@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 104" width="480" height="104"
+     role="img" style="max-width:100%;height:auto;display:block;margin:0 auto">
+<defs>
+<linearGradient id="ban_wolf" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#2b0b11"/><stop offset="1" stop-color="#7a1a26"/>
+</linearGradient>
+</defs>
+<rect x="1" y="1" width="478" height="102" rx="14" fill="url(#ban_wolf)"/>
+<rect x="9.5" y="9.5" width="461" height="85" rx="9" fill="none"
+      stroke="#c8434f" stroke-width="1.5" stroke-opacity="0.6"/>
+<g transform="translate(30 20)"><path d="M42 0a32 32 0 1 0 0 64 25 25 0 0 1 0-64z" fill="#c8434f" fill-opacity="0.9"/><g stroke="#ffb3b3" stroke-width="3.5" stroke-linecap="round" stroke-opacity="0.7"><line x1="52" y1="12" x2="66" y2="24"/><line x1="54" y1="26" x2="68" y2="38"/></g></g>
+<text x="126" y="52" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="30" font-weight="bold"
+      fill="#ffb3b3">狼人阵营胜利</text>
+<text x="126" y="78" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="14" fill="#ffb3b3"
+      fill-opacity="0.8">场上好人已全部倒下</text>
+</svg>

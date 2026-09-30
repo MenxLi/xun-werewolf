@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 72" width="460" height="72"
+     role="img" style="max-width:100%;height:auto;display:block;margin:0 auto">
+<defs>
+<linearGradient id="bg_idiot" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#0a1729"/><stop offset="1" stop-color="#1d5489"/>
+</linearGradient>
+</defs>
+<rect x="1" y="1" width="458" height="70" rx="12" fill="url(#bg_idiot)"/>
+<rect x="7.5" y="7.5" width="445" height="57" rx="8" fill="none"
+      stroke="#5db6ee" stroke-width="1.2" stroke-opacity="0.6"/>
+<circle cx="36" cy="36" r="21" fill="#5db6ee" fill-opacity="0.3"/>
+<circle cx="36" cy="36" r="21" fill="none" stroke="#5db6ee" stroke-width="1.6"/>
+<text x="36" y="35" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="bold"
+      text-anchor="middle" fill="#bfe6ff">{{SEAT}}</text>
+<text x="36" y="48" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="9" text-anchor="middle"
+      fill="#bfe6ff" fill-opacity="0.75">号</text>
+<g transform="translate(72 36) scale(0.42) translate(0 -40)"><g transform="rotate(-12 40 40)"><rect x="12" y="10" width="46" height="62" rx="7" fill="none" stroke="#5db6ee" stroke-width="6"/><circle cx="35" cy="34" r="11" fill="#5db6ee" fill-opacity="0.7"/><path d="M22 60c4-9 8-13 13-13s9 4 13 13" fill="#5db6ee" fill-opacity="0.7"/></g><g transform="rotate(14 58 44)"><rect x="42" y="18" width="38" height="52" rx="6" fill="#bfe6ff" fill-opacity="0.92"/><text x="61" y="54" font-family="Georgia, serif" font-size="32" font-weight="bold" text-anchor="middle" fill="#1d1706">?</text></g></g>
+<text x="124" y="44" font-family="'Songti SC', 'Noto Serif CJK SC', 'SimSun', serif" font-size="26" font-weight="bold"
+      fill="#bfe6ff">白痴</text>
+<text x="446" y="31" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="13" text-anchor="end"
+      fill="#bfe6ff" fill-opacity="0.95">被放逐时翻牌免死，之后失去投票权</text>
+<text x="446" y="52" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="11.5" text-anchor="end"
+      fill="#bfe6ff" fill-opacity="0.7">好人阵营 · 神职</text>
+</svg>

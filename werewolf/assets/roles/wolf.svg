@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 72" width="460" height="72"
+     role="img" style="max-width:100%;height:auto;display:block;margin:0 auto">
+<defs>
+<linearGradient id="bg_wolf" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#2b0b11"/><stop offset="1" stop-color="#7a1a26"/>
+</linearGradient>
+</defs>
+<rect x="1" y="1" width="458" height="70" rx="12" fill="url(#bg_wolf)"/>
+<rect x="7.5" y="7.5" width="445" height="57" rx="8" fill="none"
+      stroke="#c8434f" stroke-width="1.2" stroke-opacity="0.6"/>
+<circle cx="36" cy="36" r="21" fill="#c8434f" fill-opacity="0.3"/>
+<circle cx="36" cy="36" r="21" fill="none" stroke="#c8434f" stroke-width="1.6"/>
+<text x="36" y="35" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="bold"
+      text-anchor="middle" fill="#ffb3b3">{{SEAT}}</text>
+<text x="36" y="48" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="9" text-anchor="middle"
+      fill="#ffb3b3" fill-opacity="0.75">号</text>
+<g transform="translate(72 36) scale(0.42) translate(0 -40)"><path d="M52 4a38 38 0 1 0 0 72 30 30 0 0 1 0-72z" fill="#c8434f" fill-opacity="0.9"/><g stroke="#ffb3b3" stroke-width="6" stroke-linecap="round" stroke-opacity="0.75"><line x1="58" y1="14" x2="76" y2="30"/><line x1="60" y1="30" x2="78" y2="46"/><line x1="58" y1="46" x2="74" y2="62"/></g></g>
+<text x="124" y="44" font-family="'Songti SC', 'Noto Serif CJK SC', 'SimSun', serif" font-size="26" font-weight="bold"
+      fill="#ffb3b3">狼人</text>
+<text x="446" y="31" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="13" text-anchor="end"
+      fill="#ffb3b3" fill-opacity="0.95">每晚与同伴共同击杀一人</text>
+<text x="446" y="52" font-family="system-ui, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="11.5" text-anchor="end"
+      fill="#ffb3b3" fill-opacity="0.7">狼人阵营 · 狼人</text>
+</svg>

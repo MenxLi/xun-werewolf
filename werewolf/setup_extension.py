@@ -45,6 +45,9 @@ USAGE_LONG = """开局狼人杀：在当前会话里开一局，1 个真人（�
 
 **一局一会话**：打完之后这条会话就固定是法官（复盘随时问），不再改口重开 ——
 要再开一局请点前端的「新建会话」，那才是真正把 agent 交回给你自己的方式。
+**局打完了可以直接打字讨论**：法官把话转给复盘教练（它手里是那局的上帝视角记录，
+含夜间行动），回答以「复盘教练」的气泡出现；`/werewolf status` 仍然秒回看板。
+中途 `/werewolf stop` 也一样能问，只是记录只到中止为止。
 发出 `/werewolf` 那一刻起，这个 agent 自己的工具箱与默认命令都收起来了（`/tools`、`/clear`
 那些不再响应），只剩上面这几条 —— 本局你只用输入框发言，外加 `/auto-say` 让法官替你说一句。
 `/auto-say` 也是那一刻才注册：一局没开始之前它无事可干，不该出现在补全菜单里。
@@ -249,6 +252,7 @@ class GameSession:
         self.host = self.E.HostPresenter(agent)   # 构造即接管：用户发的话不进模型
         self.engine: Any = None
         self.thread: threading.Thread | None = None
+        self.reviewer: Any = None               # 一局一个，建好就留着：局后的讨论要用它的会话
         self.finalized = False
         self.players_released = False
 
@@ -288,6 +292,9 @@ class GameSession:
 
         原来只有下次 `/werewolf` 收尾旧局时才清理：座位 agent 会一直挂在会话里当幽灵参与者，
         /tmp/werewolf-XXXX 也没人删。
+
+        复盘教练是**故意不收**的：局后的讨论要靠它的会话记忆，它的工作目录（`review/`）
+        也得活着。收尾在 `cleanup()`。
         """
         import shutil
 
@@ -300,7 +307,6 @@ class GameSession:
                     actor.finalize()
                 except Exception:
                     pass
-        shutil.rmtree(self.root_dir / "review", ignore_errors=True)
         for seat in (self.engine.state.players if self.engine else {}):
             shutil.rmtree(self.root_dir / f"seat-{seat}", ignore_errors=True)
 
@@ -311,6 +317,9 @@ class GameSession:
             return
         self.finalized = True
         self.release_players()
+        if self.reviewer is not None:
+            self.reviewer.finalize()          # 教练留到这时候才收：局后的讨论要用它
+            self.reviewer = None
         self.host.stop()
         self.host.cleanup()
         shutil.rmtree(self.root_dir, ignore_errors=True)
@@ -540,9 +549,23 @@ class GameSession:
             temperature=self.TEMPERATURE_BY_LEVEL.get(config.flags.level, 0.9),
             workdir=self.root_dir / f"seat-{seat}")
 
+    def _coach(self) -> Any:
+        """复盘教练：建一次就留着（讨论靠它的会话记忆，重建等于擦掉前面聊过的）。"""
+        if self.reviewer is None:
+            self.reviewer = self.E.Reviewer(model_name=self.model_name or _resolve_model_name(),
+                                            workdir=self.root_dir / "review")
+        return self.reviewer
+
+    def discuss_with_coach(self, question: str) -> str:
+        """法官挂给 `HostPresenter` 的那个调用：局后用户说的话都到这儿。"""
+        state = self.engine.state if self.engine is not None else None
+        return self._coach().ask(question, state)
+
     def play(self, config: Any) -> None:
         E, host = self.E, self.host
         model = self.model_name or _resolve_model_name()
+        self.model_name = model                  # 教练是懒建的，到时候要用同一个模型
+        host.discussible(self.discuss_with_coach)
         engine = E.Engine(config, {}, presenter=host, seed=config.seed)
         engine.setup()
         self.engine = engine
@@ -559,18 +582,20 @@ class GameSession:
         host.info("开局。这条会话的 agent 已是法官：工具箱与自带命令都收着，"
                   "查局面 `/werewolf status`，这一句不想说 `/auto-say`。")
         if engine.run() == "aborted":
+            # 中途终止的局也想问刚才那几夜，所以照样开讨论口子（复盘生成失败也照样能问）
+            host.close_game()
+            host.info("这局中止了。想问刚才那段就直接打字 —— 复盘教练手里有到中止为止的"
+                      "整局记录（含夜间行动）。")
             return
+        host.close_game()                              # 从现在起，输入框里的话进复盘教练
         calls = sum(getattr(a, "calls", 0) for a in engine.actors.values())
         failures = sum(getattr(a, "failures", 0) for a in engine.actors.values())
         host.info(f"本局共 {state.day} 天，AI 决策 {calls} 次（其中 {failures} 次需要重试）。")
-        try:
-            reviewer = E.Reviewer(model_name=model, workdir=self.root_dir / "review")
-            host.thinking_author(E.REVIEWER)          # 复盘要读完整局，是全场最久的一步
-            host.review(reviewer.review(state))
-            reviewer.finalize()
-        except Exception as exc:
-            host.notice(state, f"复盘生成失败：{exc}")
-            host.say_as(E.REVIEWER, f"这局没生成出复盘（{type(exc).__name__}）")
+        # 复盘走讨论那条队列：它要读完整局、是全场最久的一步，这期间学员打字进来时
+        # 不能有两个线程同时用教练那个会话（生成失败由队列兜，照样能继续问）
+        host.coach_task(lambda: self._coach().review(state))
+        host.info("接下来这条会话就是复盘室：直接打字问教练（它看得到整局记录，"
+                  "含夜间行动），想重看局面用 `/werewolf status`。")
 
 
 # --------------------------------------------------------------------------- 命令入口

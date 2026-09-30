@@ -3,9 +3,12 @@
 法官**不新建 agent**：它把当前会话的 agent 接管过来 —— 注册一个 `before_execution` 钩子，
 把 `takeover_result` 填上，xun 的 execution loop 就在进模型之前直接返回（xun/hooks.py）。
 于是「法官不使用模型」不是纪律而是结构：它手里没有模型，只有公开局面，用户怎么话术都
-套不出私密信息；用户在输入框里打的字全部由 `on_user_message` 接走（发言进游戏，其余走
-`ui/answers.py` 的规则式回答）。接管是**终身**的：一局一命，局打完了法官仍在，
-把 agent 交还给用户的正规出口是前端「新建会话」，不是一条命令。
+套不出私密信息；用户在输入框里打的字全部由 `on_user_message` 接走 —— 发言进游戏，进行中的局
+里其余一律走 `ui/answers.py` 的规则式回答。**只有这一局打完了**（`close_game()`）才开一个
+受控的口子：话转交给「复盘教练」（`coach`，它读的是上帝视角全文）讨论，法官只做转发与播报。
+这个口子的代价是可控的：局已终，没有规则可被污染，终局身份也早就当众公开了。
+接管是**终身**的：一局一命，局打完了法官仍在，把 agent 交还给用户的正规出口是前端
+「新建会话」，不是一条命令。
 
 三条通道（前端渲染规则决定了为什么这么分）：
 
@@ -151,11 +154,26 @@ class HostPresenter:
         self._run_stack: contextlib.ExitStack | None = None
         self._day_seen = 0
         self._chunks = 0
+        # 局后的讨论：`coach` 是 `GameSession` 挂进来的「复盘教练」调用（question -> 回答）。
+        # 只有 `game_over` 之后用户的话才流向它：**局内一个模型字节都不调**（AGENTS.md）——
+        # 进行中的局里模型答错一句，场上就多一条说不清来路的"事实"；规则式回答顶多答得笨。
+        self.coach: Callable[[str], str] | None = None
+        self.game_over = False
+        # 教练一个会话一次只能问一句（并发会把它的会话写乱，同 `Engine._spawn` 那条纪律）。
+        # 后到的话**排队**而不是丢掉：用户已经打出来的字不该被吞，那正是我们最反对的事。
+        # 队列里既能放问题（字符串），也能放一件活（可调用）—— 生成复盘就走这条路，
+        # 否则「复盘那几十秒里学员打字」会让两个线程同时用教练那个会话。
+        self._coach_queue: list[Any] = []
+        self._queue_lock = threading.Lock()
+        self._draining = False                    # 哪个线程负责把队列抽干
         self.self_info = AgentInfo.from_agent(agent)   # 法官自己的名字/工作目录（造气泡要用）
 
     # ---------------------------------------------------------------- 接管
     def _takeover(self, args: Any) -> None:
-        """`before_execution` 钩子：这一次执行由法官回答，绝不进模型。
+        """`before_execution` 钩子：这一次执行由法官回答，绝不进 xun 的 execution loop。
+
+        局后讨论那句是法官**自己显式**去问复盘教练（`discuss`），不是让这次执行进模型：
+        走这条路仍然只有一个钩子、一份 `takeover_result`，也不会出现"模型替法官决定规则"。
 
         `schema` 不为 None 时 xun 会把 takeover_result 按 schema 校验（seat 决策都带 schema，
         但它们是自己 new 出来的 agent，压根没注册这个钩子）——这里照样接管并回一句哑话，
@@ -164,9 +182,12 @@ class HostPresenter:
         texts = [] if args.schema is not None else take_texts(args.agent)
         args.takeover_result = self.on_user_message(texts)
 
-    @_synchronized
     def on_user_message(self, texts: Sequence[str]) -> str:
         """用户在输入框发的话：**轮到真人发言时第一条一律算那句发言**，其余按向法官提问回答。
+
+        这里**故意不加 `_synchronized`**：局后的讨论要在锁外等模型（一条回答可能十几秒），
+        锁着就把播报和 `/werewolf status` 一起堵死。需要锁的那几步各自进锁（投递发言走
+        `_input`，发文字走 `_info`）；`self.state` 只读一个引用，不必为此加锁。
 
         为什么不猜意图（比如「以「法官」开头就不当发言」）：猜错的两种代价都不可接受 ——
         把真人写好的一句话吞掉，或者把他随口的问题当成发言播给全场。所以规则只有一条、可预期：
@@ -185,9 +206,94 @@ class HostPresenter:
                 self._input.notify_all()
         if not rest:
             return ""                         # 纯发言：交给引擎播报，法官不回话
+        if self.game_over and self.coach is not None:
+            return self.discuss(rest)         # 局已终：这句话交给复盘教练讨论
         reply = answers.answer(self.state, self.god_view, rest)
         self._info(reply)
         return reply
+
+    # ---------------------------------------------------------------- 局后讨论
+    @_synchronized
+    def close_game(self) -> None:
+        """这一局到此为止（打完了或被打断了）：从现在起，用户的话交给复盘教练讨论。
+
+        由 `GameSession` 在引擎返回后调用（含 `/werewolf stop` 那条路），所以判定不是
+        "state.finished" —— 中途终止的局 `finished` 仍是 False，可学员一样想问刚才那几夜。
+        """
+        self.game_over = True
+
+    def discuss(self, texts: Sequence[str]) -> str:
+        """局后讨论：把这句话转给复盘教练，回答以「复盘教练」的气泡播出去（吃 markdown）。
+
+        连发几句时后面那句排队：教练一次只处理一个，而打进来的字不该被吞。
+        抢到「抽干权」的那个线程一路把队列跑完，排队的人立刻拿到一句「排上了」就返回，
+        不占着 xun 的那次执行干等。
+        """
+        question = "\n".join(text for text in texts if text and text.strip())
+        if not question:
+            return ""
+        if not self._enqueue(question):
+            note = "排上了 —— 上一条答完就问它（教练一次只处理一个问题）。"
+            self._info(note)
+            return note
+        return self._drain_coach()
+
+    def coach_task(self, work: Callable[[], str]) -> None:
+        """交给教练跑的一件活（眼下只有一件：生成复盘报告）。
+
+        **走讨论那条队列**而不是就地调：复盘要读完整局、是全场最久的一步，这期间学员完全
+        可能打字进来，两个线程同时用教练那个会话会把它的记录写乱（和 `Engine._spawn` 的
+        「同一个座位不许同时问两次」是同一条纪律）。排进去之后由本线程抽干，
+        期间排进来的提问也一并答掉；真有别的线程在抽干时，本线程不干等 —— 它会连着做掉。
+        """
+        if self._enqueue(work):
+            self._drain_coach()
+
+    def _enqueue(self, item: Any) -> bool:
+        """排进去；返回「我是不是该负责抽干」。判空与置位在同一个临界区里，不会两头都不管。"""
+        with self._queue_lock:
+            mine = not (self._coach_queue or self._draining)
+            self._coach_queue.append(item)
+            if mine:
+                self._draining = True
+            return mine
+
+    def _drain_coach(self) -> str:
+        """一路把队列抽干（教练一次只处理一个）。返回最后一条回答，给 takeover_result 用。"""
+        answer = ""
+        while True:
+            with self._queue_lock:
+                if not self._coach_queue:
+                    self._draining = False
+                    return answer
+                item = self._coach_queue[0]
+            answer = self._coach_item(item)
+            with self._queue_lock:
+                if self._coach_queue[:1] == [item]:
+                    self._coach_queue.pop(0)
+
+    def _coach_item(self, item: Any) -> str:
+        """队列里的一项：字符串是学员的问题，可调用是交给教练跑的活。
+
+        两种失败都不许把话吞掉 —— 问题退回规则式回答（局已终，全量身份本来就公开了），
+        复盘生成失败就说清楚「不过记录还在，你照样能问」。
+        """
+        try:
+            self.thinking_author(REVIEWER)            # 这一次是真的在算（不是座位在发言）
+            answer = item() if callable(item) else (self.coach(item) if self.coach else "")
+            self.say_as(REVIEWER, answer)
+            return answer
+        except Exception as exc:
+            if callable(item):
+                self.notice(self.state, f"复盘生成失败：{exc}")
+                answer = (f"这局没生成出复盘（{type(exc).__name__}）；"
+                          f"不过记录还在，你直接问，我转给教练。")
+            else:
+                answer = (f"复盘教练这题没答上来（{type(exc).__name__}: {exc}），"
+                          f"先按公开局面回你一句：\n\n"
+                          f"{answers.answer(self.state, True, [str(item)])}")
+            self.say_as(REVIEWER, answer)
+            return answer
 
     # ---------------------------------------------------------------- 通道原语
     @_synchronized
@@ -439,6 +545,11 @@ class HostPresenter:
         """复盘报告：一条结论 + 一份 markdown（作者是「复盘教练」，这样才吃 markdown 渲染）。"""
         self.say_as(REVIEWER, report)
 
+    def discussible(self, coach: Callable[[str], str]) -> None:
+        """挂上复盘教练。挂在 `close_game()` 之前，所以复盘还在生时用户就能打字 ——
+        那句话排进队列，复盘答完就问它（`coach_task` 与 `discuss` 共用同一条队列）。"""
+        self.coach = coach
+
     # ---------------------------------------------------------------- 生命周期
     def stop_requested(self) -> bool:
         return self.stop_event.is_set()
@@ -478,6 +589,10 @@ class HostPresenter:
         """
         self._waiting.clear()
         self._opened.clear()
+        self.coach = None            # 教练由 GameSession.cleanup() finalize，这里只断引用
+        with self._queue_lock:
+            self._coach_queue.clear()
+            self._draining = False
         self._auto = False
         self._sync_running()                   # 局 end 了还挂着执行态 = 永远亮着的谎
         self._flush()                          # 中途终止也别把播报吞了

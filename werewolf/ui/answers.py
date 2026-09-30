@@ -23,11 +23,12 @@ HELP_WORDS = ("帮助", "怎么用", "怎么玩这个", "提示", "该我", "我
               "点哪里", "卡片", "按钮", "help", "指挥")
 IDENTITY_WORDS = ("身份", "谁狼", "谁是狼", "几号狼", "狼是谁", "复盘", "结果", "谁赢", "报告")
 
-USAGES = ("我能回答这几类（都只用公开信息）：\n"
+USAGES = ("局在进行中（或还没开）时，我只能用公开信息回答这几类：\n"
           "· 局面：还有谁活着 / 谁死了 / 票型 / 警徽在谁手里\n"
           "· 规则：这个板子怎么玩、胜负判定、警徽与遗言规则\n"
           "· 操作：现在该点什么、卡片怎么用\n"
-          "要查身份只有两种时候：你自己知道的事，或者这局打完了。")
+          "身份只有两种时候给：你自己知道的事，或者这局打完了。\n"
+          "想讨论这局怎么打的，等打完了直接打字 —— 那时候是复盘教练回答，它有整局记录。")
 
 
 def answer(state: GameState | None, god_view: bool, texts: Sequence[str]) -> str:
@@ -83,7 +84,8 @@ def _identity(state: GameState | None, god_view: bool) -> str:
     if state is None:
         return "还没开局，没有身份可说。"
     if state.finished:
-        return "局已终，全部公开：\n" + render.board_summary(state, god_view=True)
+        return ("局已终，全部公开：\n" + render.board_summary(state, god_view=True)
+                + "\n\n想讨论这局怎么打的，直接打字问复盘教练 —— 它有整局记录（含夜间行动）。")
     if god_view:
         return "上帝视角（你已出局）：\n" + render.board_summary(state, god_view=True)
     return ("活着的局里我不能说身份 —— 我也只知道公开信息："

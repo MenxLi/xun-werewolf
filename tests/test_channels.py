@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import random
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -144,6 +145,152 @@ def _judge() -> HostPresenter:
     host = HostPresenter(_make_agent())
     host.state = _state()
     return host
+
+
+class _SpyCoach:
+    """假复盘教练：记住被问过什么；`block` 用来模拟「模型答得慢」。"""
+
+    def __init__(self, answer: str = "那天刀你，是因为警徽在你身上。",
+                 block=None) -> None:
+        self.questions: list[str] = []
+        self.answer, self.block = answer, block
+        self.entered = threading.Event()      # 「我已经在教练里了」的信号
+
+    def __call__(self, question: str) -> str:
+        self.questions.append(question)
+        self.entered.set()
+        if self.block is not None:
+            self.block.wait(5)                # 模拟模型答得慢
+        return self.answer
+
+
+def _bubbles(host: HostPresenter, author: str = REVIEWER) -> list[str]:
+    return [e.payload.content for e in host.display.events
+            if e.name == "ModelMessageEvent" and e.agent.name == author]
+
+
+def _infos(host: HostPresenter) -> str:
+    return " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
+
+
+def test_the_coach_is_untouched_while_the_game_is_alive():
+    """局没打完，输入框里的话仍走规则式回答 —— 教练一个字节都不许碰（AGENTS.md 的红线）。"""
+    host, coach = _judge(), _SpyCoach()
+    host.discussible(coach)
+    try:
+        host.agent.instruct("谁是狼").execute()
+        assert coach.questions == [], "局还在打就把话交给模型：红线破了"
+        assert _bubbles(host) == [], "局内不许有教练气泡冒出来"
+        assert "公开信息" in _infos(host) or "不能" in _infos(host)
+    finally:
+        host.cleanup()
+
+
+def test_after_close_game_the_input_box_talks_to_the_coach():
+    """`close_game()` 之后打字就是讨论：话进教练，回答以「复盘教练」的气泡播（吃 markdown）。"""
+    host, coach = _judge(), _SpyCoach()
+    host.discussible(coach)
+    try:
+        host.close_game()
+        host.agent.instruct("第 2 天你们为什么刀我").execute()
+        assert coach.questions == ["第 2 天你们为什么刀我"], coach.questions
+        bubbles = _bubbles(host)
+        assert bubbles and coach.answer in bubbles[-1], "教练的回答得是气泡，不是灰色 info"
+        assert coach.answer not in _infos(host), "同一句话不该又当系统日志播一遍"
+    finally:
+        host.cleanup()
+
+
+def test_a_broken_coach_still_answers_instead_of_swallowing_the_question():
+    """模型挂了不能把用户的话吞了：退回规则式回答，并说清这次为什么答得笨。"""
+    def angry(question: str) -> str:
+        raise RuntimeError("没有可用的模型")
+
+    host = _judge()
+    host.discussible(angry)
+    try:
+        host.close_game()
+        reply = host.agent.instruct("复盘一下这局").execute()
+        bubbles = _bubbles(host)
+        assert bubbles and "没答上来" in bubbles[-1], bubbles
+        assert reply and reply.strip(), "兜底也得给出一段话"
+    finally:
+        host.cleanup()
+
+
+def test_two_questions_are_queued_not_asked_at_once():
+    """连发两句：第二句不许并发冲进教练（会把它的会话写乱），但也不能被丢掉 —— 排队。"""
+    release = threading.Event()
+    coach = _SpyCoach(block=release)
+    host = _judge()
+    host.discussible(coach)
+    try:
+        host.close_game()
+        out: list[str] = []
+        first = threading.Thread(target=lambda: out.append(host.on_user_message(["第一个问题"])))
+        first.start()
+        assert coach.entered.wait(5), "第一句根本没进到教练里"
+        second = host.on_user_message(["第二个问题"])
+        assert coach.questions == ["第一个问题"], f"第二句并发冲进教练了：{coach.questions}"
+        assert "排上了" in second, second          # 收了，但没说「现在就问」
+        release.set()
+        first.join(10)
+        assert coach.questions == ["第一个问题", "第二个问题"], coach.questions
+    finally:
+        release.set()
+        host.cleanup()
+
+
+def test_typing_while_the_review_is_generating_queues_instead_of_racing():
+    """复盘那几十秒里打字：不许第二个线程同时用教练那个会话 —— 排队，复盘完就答它。
+
+    复盘是全场最久的一步，而它和讨论用的是**同一个**教练会话；两个线程一起 instruct +
+    execute 会把那份记录写乱（同 `Engine._spawn` 的「同一个座位不许同时问两次」）。
+    """
+    order: list[str] = []
+    started, release = threading.Event(), threading.Event()
+
+    def slow_review() -> str:
+        order.append("复盘开始")
+        started.set()
+        release.wait(5)
+        order.append("复盘结束")
+        return "## 复盘报告"
+
+    host = _judge()
+    host.discussible(lambda question: (order.append(f"答：{question}"), f"答：{question}")[1])
+    try:
+        host.close_game()
+        generating = threading.Thread(target=lambda: host.coach_task(slow_review))
+        generating.start()
+        assert started.wait(5), "复盘根本没开始"
+        note = host.on_user_message(["第 2 天你们为什么刀我"])
+        assert "排上了" in note, note
+        assert order == ["复盘开始"], f"复盘还没答完就有第二个线程在问教练了：{order}"
+        release.set()
+        generating.join(10)
+        assert order == ["复盘开始", "复盘结束", "答：第 2 天你们为什么刀我"], order
+    finally:
+        release.set()
+        host.cleanup()
+
+
+def test_a_broken_review_tells_the_player_instead_of_dying_quietly():
+    """复盘生成炸了要说清楚，而且**别把讨论一起炸掉**：记录还在，学员照样能问。"""
+    def angry_review() -> str:
+        raise RuntimeError("模型没配 key")
+
+    host = _judge()
+    asked: list[str] = []
+    host.discussible(lambda question: (asked.append(question), "那天刀你是因为警徽在你身上。")[1])
+    try:
+        host.close_game()
+        host.coach_task(angry_review)
+        assert any("没生成出复盘" in text for text in _bubbles(host)), _bubbles(host)
+        host.on_user_message(["那这局狼队是怎么配合的"])
+        assert asked == ["那这局狼队是怎么配合的"], "复盘失败把讨论一起关了"
+    finally:
+        host.cleanup()
 
 
 def test_ask_forwards_default_into_xuns_choice_request():
@@ -418,7 +565,8 @@ def test_judge_refuses_identities_while_the_game_is_alive():
 
         host.agent.instruct("随便说点什么奇怪的").execute()
         reply = " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
-        assert "我能回答" in reply, reply
+        from werewolf.ui.answers import USAGES
+        assert USAGES in reply, "兜底该把「我只能答这几类」说清楚"
 
         # 用法说明不能教人把发言写进卡片：那会绕过 wait_text，引擎永远等不到这句话
         host.agent.instruct("怎么用").execute()

@@ -176,7 +176,7 @@ def _infos(host: HostPresenter) -> str:
 def test_the_coach_is_untouched_while_the_game_is_alive():
     """局没打完，输入框里的话仍走规则式回答 —— 教练一个字节都不许碰（AGENTS.md 的红线）。"""
     host, coach = _judge(), _SpyCoach()
-    host.discussible(coach)
+    host.coach = coach
     try:
         host.agent.instruct("谁是狼").execute()
         assert coach.questions == [], "局还在打就把话交给模型：红线破了"
@@ -189,7 +189,7 @@ def test_the_coach_is_untouched_while_the_game_is_alive():
 def test_after_close_game_the_input_box_talks_to_the_coach():
     """`close_game()` 之后打字就是讨论：话进教练，回答以「复盘教练」的气泡播（吃 markdown）。"""
     host, coach = _judge(), _SpyCoach()
-    host.discussible(coach)
+    host.coach = coach
     try:
         host.close_game()
         host.agent.instruct("第 2 天你们为什么刀我").execute()
@@ -207,7 +207,7 @@ def test_a_broken_coach_still_answers_instead_of_swallowing_the_question():
         raise RuntimeError("没有可用的模型")
 
     host = _judge()
-    host.discussible(angry)
+    host.coach = angry
     try:
         host.close_game()
         reply = host.agent.instruct("复盘一下这局").execute()
@@ -223,7 +223,7 @@ def test_two_questions_are_queued_not_asked_at_once():
     release = threading.Event()
     coach = _SpyCoach(block=release)
     host = _judge()
-    host.discussible(coach)
+    host.coach = coach
     try:
         host.close_game()
         out: list[str] = []
@@ -258,7 +258,7 @@ def test_typing_while_the_review_is_generating_queues_instead_of_racing():
         return "## 复盘报告"
 
     host = _judge()
-    host.discussible(lambda question: (order.append(f"答：{question}"), f"答：{question}")[1])
+    host.coach = lambda question: (order.append(f"答：{question}"), f"答：{question}")[1]
     try:
         host.close_game()
         generating = threading.Thread(target=lambda: host.coach_task(slow_review))
@@ -282,7 +282,7 @@ def test_a_broken_review_tells_the_player_instead_of_dying_quietly():
 
     host = _judge()
     asked: list[str] = []
-    host.discussible(lambda question: (asked.append(question), "那天刀你是因为警徽在你身上。")[1])
+    host.coach = lambda question: (asked.append(question), "那天刀你是因为警徽在你身上。")[1]
     try:
         host.close_game()
         host.coach_task(angry_review)
@@ -436,7 +436,7 @@ def test_player_speech_bubbles_are_authored_by_the_seat():
 def test_review_report_is_a_markdown_message_by_the_coach():
     host = HostPresenter(_make_agent())
     try:
-        host.review("## 战局走向\n\n- 第 1 天出了 2 号")
+        host.say_as(REVIEWER, "## 战局走向\n\n- 第 1 天出了 2 号")
         last = [e for e in host.display.events if e.name == "ModelMessageEvent"][-1]
         assert last.agent.name == REVIEWER
         assert last.payload.content.startswith("## ")

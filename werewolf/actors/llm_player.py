@@ -26,6 +26,32 @@ def rebase_system(current: str | None, static: str) -> str | None:
     return static if not text else f"{static}\n\n## 前情摘要（更早的会话已被压缩）\n{text}"
 
 
+def hard_char_budget(cfg: Any) -> int:
+    """兜底硬顶的字符数：设在 auto_compact 阈值之上，正常一局永远碰不到。
+
+    只有 auto_compact 被关掉、或模型窗口很小那种情况，`trim_conversation` 才替它剪。
+    """
+    return max(cfg.auto_compact.token_threshold * 2, 4000)
+
+
+def trim_conversation(conv: Any, char_budget: int, keep_pairs: int, head: int = 1) -> None:
+    """超过硬顶才剪，且只剪尾巴：留下开头 `head` 条 + 最近 `keep_pairs` 对问答。
+
+    座位传 1（只钉 system，前情提要每轮重发，老发言可剪）；复盘教练传 2（钉住 system +
+    那份对局记录 —— 学员追问的正是记录里的细节，剪掉等于让教练凭印象下棋）。
+    """
+    if conv.estimated_message_length() <= char_budget:
+        return
+    messages = conv.messages
+    keep = head if messages and messages[0].get("role") == "system" else 0
+    if len(messages) <= keep + 2 * keep_pairs:
+        return
+    tail = messages[-(2 * keep_pairs):]
+    # 剪完得从一条 user 开始：留着以 assistant 开头的会话，有的 provider 直接 400
+    tail = tail[next((i for i, m in enumerate(tail) if m.get("role") == "user"), 0):]
+    conv.messages[:] = messages[:keep] + tail
+
+
 class LLMActor:
     """一个座位一个 agent，私有会话；只能看到 Ask 里给它的内容。"""
 
@@ -60,10 +86,7 @@ class LLMActor:
         cfg.model.name = model_name
         cfg.model.temperature = temperature   # 只覆盖温度（那是「AI 水平」那一档）；
                                               # 其余模型参数照用户 xun 配置，包括思考强度
-        # 长局里座位的会话交给 xun 的 auto_compact（默认阈值见用户配置）先做一次摘要压缩。
-        # 下面这个字符上限只是**兜底硬顶**：设在阈值之上，正常一局永远碰不到，
-        # 只有在 auto_compact 被关掉 / 模型窗口很小时才代替它把老对话剪掉。
-        self.char_budget = max(cfg.auto_compact.token_threshold * 2, 4000)
+        self.char_budget = hard_char_budget(cfg)
         self.agent = Agent(
             name=f"{seat}号",
             display=NullDisplay(),
@@ -91,16 +114,7 @@ class LLMActor:
             self.agent.system(rebuilt)
 
     def _trim(self) -> None:
-        """兜底硬顶：只在 auto_compact 被关掉 / 模型窗口很小时才代替它剪掉老对话。"""
-        conv = self.agent.conversation
-        if conv.estimated_message_length() <= self.char_budget:
-            return
-        messages = conv.messages
-        head = messages[:1] if messages and messages[0].get("role") == "system" else []
-        tail = messages[-(2 * self.keep_pairs):]
-        # 剪完得从一条 user 开始：留着以 assistant 开头的会话，有的 provider 直接 400
-        tail = tail[next((i for i, m in enumerate(tail) if m.get("role") == "user"), 0):]
-        conv.messages[:] = head + tail
+        trim_conversation(self.agent.conversation, self.char_budget, self.keep_pairs)
 
     def _validate(self, ask: Ask, decision: Any) -> Any:
         pool = list(ask.pool)

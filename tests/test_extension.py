@@ -10,12 +10,21 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+#: extension 目录 == 引擎包：入口 setup_extension.py 在它根部，engine/ actors/ ui/ 在旁边
+ROOT = Path(__file__).resolve().parents[1]              # 仓库根
+EXT_DIR = ROOT / "werewolf"
+#: 入口顶层不许 import 的东西 —— 搬进包里之后，引擎既能绝对导入进来，也能相对导入进来
+ENGINE_ROOTS = {"werewolf", "engine", "actors", "ui"}
 
 
 def _ext():
-    """extension 就是仓库根的这一个文件。"""
-    return importlib.import_module("setup_extension")
+    """入口是 `werewolf/setup_extension.py`。
+
+    从仓库根绝对导入它：`__package__` 于是是 `werewolf`，引擎按相对导入解析成
+    `werewolf.engine.*` —— 和这里测试用的是同一份引擎，不会出现两份全局状态。
+    生产里 xun 用 `xun_ext_werewolf` 包壳加载那条路，归 test_entry_loads_the_way_xun_does 管。
+    """
+    return importlib.import_module("werewolf.setup_extension")
 
 
 class FakeCommandRegistry:
@@ -103,15 +112,21 @@ def test_extension_entry_contract():
 
 
 def test_extension_does_not_import_engine_at_module_level():
-    """命令执行前不许 import 引擎：加载 extension 必须零副作用。"""
-    tree = ast.parse((ROOT / "setup_extension.py").read_text())
+    """命令执行前不许 import 引擎：加载 extension 必须零副作用。
+
+    入口就住在引擎包里，于是引擎既能 `import werewolf.engine` 进来，也能一句顶层
+    `from . import engine` 进来 —— 两条都要拦（相对那条是入口搬进包之后新出现的）。
+    """
+    tree = ast.parse((EXT_DIR / "setup_extension.py").read_text())
     for node in tree.body:                      # 只看模块顶层
-        names: list[str] = []
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0, f"顶层相对导入了引擎：.{node.module}"
             names = [node.module or ""]
-        assert not any(name.split(".")[0] == "werewolf" for name in names), \
+        else:
+            continue
+        assert not any(name.split(".")[0] in ENGINE_ROOTS for name in names), \
             f"顶层 import 了引擎：{names}"
 
 
@@ -135,11 +150,11 @@ def test_entry_loads_the_way_xun_does():
     pkg = "xun_ext_werewolf_probe"
     saved = {k for k in sys.modules if k.startswith(pkg)}
     shell = types.ModuleType(pkg)
-    shell.__path__ = [str(ROOT)]                        # 与 xun extension.py 的做法一致
+    shell.__path__ = [str(EXT_DIR)]                     # 与 xun extension.py 的做法一致
     sys.modules[pkg] = shell
     name = f"{pkg}.setup_extension"
     try:
-        spec = importlib.util.spec_from_file_location(name, ROOT / "setup_extension.py")
+        spec = importlib.util.spec_from_file_location(name, EXT_DIR / "setup_extension.py")
         mod = importlib.util.module_from_spec(spec)
         sys.modules[name] = mod
         spec.loader.exec_module(mod)                    # 加载时只该注册命令
@@ -420,7 +435,7 @@ def test_rule_tweaks_do_not_leak_into_the_shared_presets():
     同一份 PRESETS，被写过就白捡上一局改过的规则。
     """
     rt = _ext()
-    from ..engine.config import RuleFlags
+    from werewolf.engine.config import RuleFlags
 
     E = rt._load_engine()
     default_limit = RuleFlags().speech_word_limit
@@ -467,7 +482,7 @@ def test_the_human_seat_gets_a_proxy_for_auto_say():
     玩家写好按下的那句话被吞，场上只看到一句莫名的默认发言。
     """
     rt = _ext()
-    from ..engine.config import PRESETS
+    from werewolf.engine.config import PRESETS
 
     session = _fake_session(rt)
     made: list[dict] = []
@@ -509,7 +524,7 @@ class _ScriptedSeat:
     def __init__(self, seat=None, **kw) -> None:
         import random
 
-        from ..actors.fake import FakeActor
+        from werewolf.actors.fake import FakeActor
 
         self.seat, self.is_human = seat, False
         self.calls, self.failures = 0, 0
@@ -532,8 +547,8 @@ def test_a_finished_game_reports_stats_and_reaches_the_review():
     """
 
     rt = _ext()
-    from ..engine.config import PRESETS
-    from ..ui.host import REVIEWER
+    from werewolf.engine.config import PRESETS
+    from werewolf.ui.host import REVIEWER
 
     session = _fake_session(rt)
 

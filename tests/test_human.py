@@ -4,11 +4,11 @@ from __future__ import annotations
 import random
 from typing import Sequence
 
-from ..actors.fake import FakeActor
-from ..actors.human import HumanActor
-from ..engine.config import PRESETS
-from ..engine.engine import Engine
-from ..engine.presenter import NullPresenter
+from werewolf.actors.fake import FakeActor
+from werewolf.actors.human import HumanActor
+from werewolf.engine.config import PRESETS
+from werewolf.engine.engine import Engine
+from werewolf.engine.presenter import NullPresenter
 
 
 class StubHost:
@@ -148,10 +148,10 @@ def test_human_prompts_always_offer_legal_seats_only():
 
 def test_every_actor_implements_the_full_protocol():
     """人类 / AI 玩家都要能回答引擎可能问到的每种决策，否则阶段会卡住。"""
-    from ..actors.fake import FakeActor
-    from ..actors.llm_player import LLMActor
+    from werewolf.actors.fake import FakeActor
+    from werewolf.actors.llm_player import LLMActor
 
-    from ..engine.ask import KINDS
+    from werewolf.engine.ask import KINDS
 
     for cls in (HumanActor, FakeActor, LLMActor):
         assert hasattr(cls, "decide") and hasattr(cls, "finalize"), cls.__name__
@@ -162,7 +162,7 @@ def test_every_actor_implements_the_full_protocol():
 
 def test_prompt_titles_say_night_or_day():
     """夜间阶段的卡片标题写“第 N 夜”，白天写“第 N 天”，别把玩家绕晕。"""
-    from ..engine.ask import Ask, KIND_SEER, KIND_SPEECH
+    from werewolf.engine.ask import Ask, KIND_SEER, KIND_SPEECH
 
     host = StubHost()
     HumanActor(1, host).decide(Ask(kind=KIND_SEER, day=1, phase="night_1", seat=1, pool=(2, 3)))
@@ -180,7 +180,7 @@ def test_speech_is_collected_from_the_input_box():
     卡片那个小输入框写长文很难受（会被顶起、看不到前面的发言流），所以长文本一律走
     `wait_text`。这里盯两件事：真的走了 wait_text、提示里说清去哪儿说话和字数建议。
     """
-    from ..engine.ask import Ask, KIND_SPEECH
+    from werewolf.engine.ask import Ask, KIND_SPEECH
 
     host = StubHost()
     speech = HumanActor(1, host).decide(Ask(kind=KIND_SPEECH, day=1, phase="speech_1",
@@ -194,7 +194,7 @@ def test_speech_is_collected_from_the_input_box():
 
 
 def test_last_words_also_use_the_input_box():
-    from ..engine.ask import Ask, KIND_LAST_WORDS
+    from werewolf.engine.ask import Ask, KIND_LAST_WORDS
 
     host = StubHost()
     words = HumanActor(4, host).decide(Ask(kind=KIND_LAST_WORDS, day=1,
@@ -209,7 +209,7 @@ def test_speech_card_shows_the_speaking_order():
     以前真人在这里看到的是 actor 自己拼的第二套说法（"已发言…，你是第 N 个"），和 AI
     拿到的 `Ask.position_text()` 迟早会说不一致的顺序。现在卡片副标题 == position_text。
     """
-    from ..engine.ask import Ask, KIND_SPEECH
+    from werewolf.engine.ask import Ask, KIND_SPEECH
 
     opening = Ask(kind=KIND_SPEECH, day=1, phase="speech_1", seat=3, pool=(2, 4),
                   word_limit=100, order=(3, 2, 4), direction=1)
@@ -233,7 +233,7 @@ def test_speech_card_shows_the_speaking_order():
 
 def test_non_speech_cards_say_which_seat_is_asked():
     """不涉及发言顺序的卡片（投票、夜里行动）副标题写「几号（你）的行动」。"""
-    from ..engine.ask import Ask, KIND_VOTE
+    from werewolf.engine.ask import Ask, KIND_VOTE
 
     host = StubHost()
     HumanActor(5, host).decide(Ask(kind=KIND_VOTE, day=1, phase="vote_1", seat=5, pool=(1, 2)))
@@ -244,7 +244,7 @@ def test_auto_say_lets_the_proxy_speak_this_one_line():
     """`/auto-say`：这一句由替身演员产，并告诉法官「这句要让全场听见」。"""
     from types import SimpleNamespace
 
-    from ..engine.ask import Ask, KIND_SPEECH
+    from werewolf.engine.ask import Ask, KIND_SPEECH
 
     class _Proxy:
         def __init__(self) -> None:
@@ -282,7 +282,7 @@ def test_witch_card_asks_about_antidote_only_when_saving_is_possible():
     以前是拿 note 里有没有「不再知道刀口」判断的：改一句法官措辞就等于改规则，
     而狼空刀那一夜那句文案本来就是假的（她两瓶药都在，却被跳过了问解药）。
     """
-    from ..engine.ask import Ask, KIND_WITCH
+    from werewolf.engine.ask import Ask, KIND_WITCH
 
     stuck = Ask(kind=KIND_WITCH, day=1, phase="night_1", seat=4, pool=(1, 2, 3, 5),
                 note="今夜被刀的是 3号。", save_pool=())    # 解药已用：救不了
@@ -307,7 +307,7 @@ def test_witch_card_never_offers_her_own_seat_and_skips_a_spent_poison():
     第二瓶药用完之后每一夜还在问「毒谁」—— 点了任何一个都会被静默丢掉。
     现在候选池由引擎算好（不含她自己，药用完就是空池），卡片只照着池子摆按钮。
     """
-    from ..engine.ask import Ask, KIND_WITCH
+    from werewolf.engine.ask import Ask, KIND_WITCH
 
     host = StubHost()
     HumanActor(4, host).decide(Ask(kind=KIND_WITCH, day=1, phase="night_1", seat=4,
@@ -330,8 +330,8 @@ def test_a_human_wolf_can_send_the_pack_a_short_line():
 
     以前只有大模型狼有 `reason`，真人那张卡只有座位按钮 —— 真人狼等于天生不能沟通。
     """
-    from ..engine.ask import Ask, KIND_WOLF_TARGET
-    from ..actors.human import HumanActor
+    from werewolf.engine.ask import Ask, KIND_WOLF_TARGET
+    from werewolf.actors.human import HumanActor
 
     def run(reply: str):
         host = StubHost()

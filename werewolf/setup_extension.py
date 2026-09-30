@@ -3,9 +3,10 @@
 装上之后在会话里发 `/werewolf` 就开局：1 个真人（你）+ 其余座位 AI，法官用卡片问你板子、
 座位、角色、规则，然后自动天黑。xun 的发现规则是
 `{XUN_HOME}/extensions/<name>/setup_extension.py`（`XUN_HOME` 未设时是 `./.xun`），
-所以**仓库根目录本身就是 extension 目录**：把整个仓库拷贝或 symlink 成
-`{XUN_HOME}/extensions/werewolf/` 即可。引擎包 `werewolf/` 就在本文件旁边，因此引擎一律
-**相对导入**（见 `_load_engine()`）——xun 的 package 形态本就为此设计，不需要 `sys.path` 魔法。
+extension 的名字就是这个目录名，所以**本目录（`werewolf/`）就是那个 extension 目录**：
+整目录拷贝或 symlink 成 `{XUN_HOME}/extensions/werewolf/` 即可（`pack.py` 打的包也是这一层）。
+引擎子包（`engine/ actors/ ui/`）就在本文件旁边，因此引擎一律**相对导入**（见
+`_load_engine()`）——xun 的 package 形态本就为此设计，不需要 `sys.path` 魔法。
 代价是不再支持「只拷这一个文件」的装法：flat 形态 `extensions/{name}.py` 不支持相对导入。
 
 两条纪律（有测试锁死，别破）：
@@ -85,9 +86,10 @@ _ENGINE: Any = None
 def _load_engine() -> Any:
     """第一次用到才 import 引擎，返回一个命名空间（引擎里统一写 `E.XXX`）。
 
-    引擎包 `werewolf/` 就在本文件旁边，所以按 xun 的 package 形态**相对导入**。
-    被当成顶层模块加载时（跑测试、`.dev/` 里的脚本）退回绝对导入 —— 一个进程里只会
-    走其中一条路，两条路混用会出现两份引擎身份（各自独立的全局状态），别混。
+    引擎子包就在本文件旁边，所以只有相对导入这一条路：xun 用 `xun_ext_werewolf` 包壳加载本
+    文件时，`__package__` 是那个包壳；在仓库根 `import werewolf.setup_extension`（跑测试）时，
+    它是 `werewolf`。身份跟着加载方式走，但**一个进程只走其中一条** —— 混用会出现两份引擎
+    （各自独立的全局状态）。所以这里不退回绝对导入，也别往 sys.path 里塞东西。
     """
     global _ENGINE
     if _ENGINE is not None:
@@ -96,7 +98,7 @@ def _load_engine() -> Any:
     from importlib import import_module
     from types import SimpleNamespace
 
-    pkg = f"{__package__}.werewolf" if __package__ else "werewolf"
+    pkg = __package__          # 相对导入的锚点：xun 的包壳名，或 `werewolf`（测试从仓库根导入）
 
     def imp(module: str, attr: str | None = None):
         loaded = import_module(f".{module}", package=pkg)
@@ -127,12 +129,14 @@ def _load_engine() -> Any:
 def _broken_install_hint(exc: BaseException) -> str:
     """装错了要说清三件事：缺什么、入口现在在哪、能照抄的修法。"""
     return (
-        "导入狼人杀引擎失败，这份 extension 不完整：引擎包 `werewolf/`"
-        "（看得到 `werewolf/engine/engine.py` 才算完整）必须和入口同目录，靠相对导入进来。\n\n"
+        "导入狼人杀引擎失败，这份 extension 不完整：引擎子包（`engine/ actors/ ui/ assets/`）"
+        "必须和入口 `setup_extension.py` 在同一个 `werewolf/` 目录里，靠相对导入进来 —— "
+        "装好后这里应当看得到 `extensions/werewolf/engine/engine.py`。\n\n"
         f"入口现在在：`{Path(__file__)}`\n"
         f"底层报错：`{type(exc).__name__}: {exc}`\n\n"
-        "修法是**把整个仓库**放到 extension 位置（不是只拷一个文件）：\n"
-        "  `cp -r <本仓库> <XUN_HOME>/extensions/werewolf`　（目标名要是 `werewolf`）"
+        "修法是**把整个 `werewolf/` 目录**放到 extension 位置（目录名叫 `werewolf`，别只拷入口）：\n"
+        "  `cp -r <本仓库>/werewolf <XUN_HOME>/extensions/werewolf`\n"
+        "  或 `unzip werewolf-<时间戳>.zip -d <XUN_HOME>/extensions/`"
     )
 
 

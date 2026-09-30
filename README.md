@@ -5,7 +5,8 @@
 在会话里发 `/werewolf`，开一局 **1 个真人（你）+ 其余座位 AI** 的狼人杀：法官用卡片问你要什么板子、坐几号、演谁、规则怎么微调，然后自动天黑；你出局后还能继续问法官、要复盘。
 
 安装方法：
-将`werewolf` 文件夹放到 `$XUN_HOME/extensions/`（默认`./.xun/extensions/`）。
+把 `werewolf` 文件夹整个放到 `$XUN_HOME/extensions/` 下（默认 `./.xun/extensions/`），目录名保持 `werewolf`。
+就是 zip 解压出来的那一层，或者本仓库里的 `werewolf/` —— 它的根部是 xun 要的入口 `setup_extension.py`。
 
 **本插件完全由 xun 驱动的 Agent 开发...不保证代码质量与稳定性。**
 
@@ -29,15 +30,16 @@
 
 xun 的 home **不是家目录**：`config.get_home_dir()` 先看环境变量 `XUN_HOME`，没有就用
 **启动 xun 时所在目录**下的 `.xun`（`Path.cwd() / ".xun"`）。扩展装在 `$XUN_HOME/extensions/` 里，
-package 形态的文件名固定是 `extensions/<名字>/setup_extension.py`。
+package 形态的文件名固定是 `extensions/<名字>/setup_extension.py`，**目录名就是 extension 的名字**。
 
 ```bash
 XUN_HOME_DIR="${XUN_HOME:-$PWD/.xun}"                 # 在你打算启动 xun 的那个目录里执行
 mkdir -p "$XUN_HOME_DIR/extensions"
-ln -s "$(pwd)" "$XUN_HOME_DIR/extensions/werewolf"    # 整个仓库就是 extension 目录；改完代码重启 xun 生效
+ln -s "$(pwd)/werewolf" "$XUN_HOME_DIR/extensions/werewolf"   # 仓库里这一层就是 extension 目录；改完代码重启 xun 生效
 ```
 
-或打包后解到 `$XUN_HOME/extensions/`（zip 顶层已经是 `werewolf/`）。
+或打包后解到 `$XUN_HOME/extensions/`：`unzip dist/werewolf-<时间戳>.zip -d "$XUN_HOME_DIR/extensions/"`。
+zip 顶层就是 `werewolf/`，里面只有运行时（引擎、卡片、SVG 资产）—— README、AGENTS、pack.py、`tests/` 留在仓库根，不进包。
 前提：xun 里配好了模型与 key（AI 座位真的会调模型）、**Python 3.12+**（照 xun 的 `requires-python`）。
 
 ## 玩
@@ -117,8 +119,8 @@ xun 在 ExecutionScope 进出时广播 `AgentRunningStart/EndEvent` —— 新�
 期间草稿照样发得出去。
 
 ```bash
-python -m werewolf.tests.run          # 187 项 / 11 套件，全部用脚本玩家，不发一次 LLM 请求
-WEREWOLF_UI=text python -m werewolf.tests.run      # 同一套再跑一遍纯文本形态
+python -m tests.run          # 187 项 / 11 套件，全部用脚本玩家，不发一次 LLM 请求
+WEREWOLF_UI=text python -m tests.run               # 同一套再跑一遍纯文本形态
 ```
 
 看板卡片那几项测试需要 xun 提供 `HTMLInfoEvent`；xun 太旧没这个类时它们会报 `ImportError`，
@@ -133,5 +135,8 @@ WEREWOLF_UI=text python -m werewolf.tests.run      # 同一套再跑一遍纯文
 插件另外留了一个设在阈值之上的**兜底硬顶**（`LLMActor.keep_pairs=14` 对），只有你把 auto_compact 关掉时才会用到。
 再往前的历史靠每轮重算的**前情提要**：`RECAP_EVENTS=24` 条事件，一条发言在提要里留 `_clip=90` 字 ——
 这两个数就是玩家「还记得前面谁说过什么」的窗口大小，`test_flow` 钉着下限，别顺手调小。
+
+仓库布局：`werewolf/` 那一层就是装进 `extensions/` 的那一层 —— 入口 `setup_extension.py` 在它根部，`engine/ actors/ ui/ assets/` 在旁边，入口与引擎之间只有相对导入（不需要 `sys.path` 魔法）。
+开发期的东西都留在仓库根、都不进包：README、AGENTS、`pack.py`，以及 `tests/`（测试绝对导入引擎，所以**在仓库根跑** `python -m tests.run`）。
 
 要改代码，先看 **`AGENTS.md`**。

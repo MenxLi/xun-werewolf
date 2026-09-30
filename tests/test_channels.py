@@ -10,18 +10,18 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from ..actors.fake import FakeActor
-from ..engine.config import PRESETS
-from ..engine.engine import Engine
-from ..engine.events import (
+from werewolf.actors.fake import FakeActor
+from werewolf.engine.config import PRESETS
+from werewolf.engine.engine import Engine
+from werewolf.engine.events import (
     K_DEATH_ANNOUNCE, K_EXILE, K_LAST_WORDS, K_SHERIFF_SPEECH, K_SPEECH, K_VOTE,
     K_VOTE_RESULT, K_WIN, Event,
 )
-from ..engine.presenter import NullPresenter
-from ..engine.state import GameState
-from ..ui import render
+from werewolf.engine.presenter import NullPresenter
+from werewolf.engine.state import GameState
+from werewolf.ui import render
 from . import harness
-from ..ui.host import REVIEWER, HostPresenter
+from werewolf.ui.host import REVIEWER, HostPresenter
 from xun.display_abstract import AgentInfo, DisplayAbstract, DisplayEvent
 
 
@@ -476,7 +476,7 @@ def test_status_block_refreshes_when_the_day_changes():
 
 
 def test_board_lines_are_plain_text_lines():
-    from ..engine.config import PRESETS
+    from werewolf.engine.config import PRESETS
 
     rows = render.build_board_lines(PRESETS[0].config)
     assert rows[0].startswith("板子：")
@@ -647,8 +647,8 @@ def test_public_board_never_assigns_identities_or_counts_wolves():
     """
     import re
 
-    from ..engine.roles import ROLES
-    from ..ui import answers
+    from werewolf.engine.roles import ROLES
+    from werewolf.ui import answers
 
     state = _state()
     exits = {
@@ -698,7 +698,7 @@ def test_reasking_a_seat_closes_its_stale_window():
     执行态 —— 「运行中」就从此对着一局早算完的牌局永远亮着。
     先自校验夹具：真有两个环节的作者标签不同，否则这条用例是空转的。
     """
-    from ..engine import events as ev
+    from werewolf.engine import events as ev
 
     host = HostPresenter(_make_agent())
     try:
@@ -768,7 +768,7 @@ def test_the_line_the_judge_spoke_is_heard_by_the_table():
     「不重播真人自己的话」那条过滤（`_own_labels`）针对的是他自己输入框里那句；代说的
     那句要是也被一起吞掉，场上就等于假装他没说话。
     """
-    from ..engine.events import K_SPEECH, PUBLIC, Event
+    from werewolf.engine.events import K_SPEECH, PUBLIC, Event
 
     host = HostPresenter(_make_agent())
     try:

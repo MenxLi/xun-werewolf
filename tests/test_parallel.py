@@ -10,12 +10,12 @@ import random
 import threading
 import time
 
-from ..actors.fake import FakeActor
-from ..engine.config import SEER, VILLAGER, WIN_CITY, WOLF, GameConfig, RuleFlags
-from ..engine.decisions import Ballot, SeerCheck, WolfProposal, WitchAction
-from ..engine.engine import GROUP_WORKERS, Engine
-from ..engine.events import K_EXILE
-from ..engine.presenter import NullPresenter
+from werewolf.actors.fake import FakeActor
+from werewolf.engine.config import SEER, VILLAGER, WIN_CITY, WOLF, GameConfig, RuleFlags
+from werewolf.engine.decisions import Ballot, SeerCheck, WolfProposal, WitchAction
+from werewolf.engine.engine import GROUP_WORKERS, Engine
+from werewolf.engine.events import K_EXILE
+from werewolf.engine.presenter import NullPresenter
 
 HANDSHAKE_TIMEOUT = 5.0
 
@@ -219,7 +219,7 @@ def test_a_hung_seat_times_out_and_the_game_carries_on():
     xun 建 client 不传 HTTP timeout，所以这种请求真的存在；插件先前写好了「超时→托管」
     这句话却没写计时器，一个座位就把整局钉死（连停局都要等它）。
     """
-    from ..engine import engine as engine_module
+    from werewolf.engine import engine as engine_module
 
     saved = engine_module.ASK_TIMEOUT_SEC
     engine_module.ASK_TIMEOUT_SEC = 0.3
@@ -250,7 +250,7 @@ def test_a_seat_with_a_question_still_in_flight_is_never_asked_twice():
     - `attempts` = 发问出口撞上一次还没回来的次数（证明这测试真的测到了那一刻）；
     - `overlap`  = 演员侧真的同时被叫进去两次（守护没拦住就得红）。
     """
-    from ..engine import engine as engine_module
+    from werewolf.engine import engine as engine_module
 
     saved = engine_module.ASK_TIMEOUT_SEC
     engine_module.ASK_TIMEOUT_SEC = 0.3
@@ -312,7 +312,7 @@ def test_a_terminated_game_voids_the_questions_not_yet_dispatched():
     用户点「停」时往往有一串问题还在排队：逐个抛出去没人收答案，还会让停掉的局
     继续对着会话发问。
     """
-    from ..engine.presenter import GameAborted
+    from werewolf.engine.presenter import GameAborted
 
     cfg = _config()
 

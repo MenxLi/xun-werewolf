@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""把整个仓库打包成一个可直接投喂给 xun 的 extension zip。
+"""把仓库根的 `werewolf/` 打包成一个可直接投喂给 xun 的 extension zip。
 
     python pack.py                # dist/werewolf-<yyyymmdd-HHMM>.zip
     python pack.py --out DIR      # 换输出目录
     python pack.py --check X.zip  # 校验必需文件，并照 xun 的方式真加载一次入口
 
-zip 的根目录就叫 `werewolf/`，所以**解压到 `{XUN_HOME}/extensions/` 底下就完事**
-（`XUN_HOME` 未设时是 `./.xun`）：
+包里的顶层目录就叫 `werewolf/`（入口 `setup_extension.py` 在它根部），所以**解压到
+`{XUN_HOME}/extensions/` 底下就完事**（`XUN_HOME` 未设时是 `./.xun`）。包里只有运行时
+（引擎、演员、显示层、SVG 资产）—— 仓库根的 README.md、AGENTS.md、pack.py、tests/ 都不进包：
 
     unzip dist/werewolf-<时间戳>.zip -d "${XUN_HOME:-$PWD/.xun}/extensions/"
     # → ./.xun/extensions/werewolf/setup_extension.py（xun 的 home 在启动目录下，不在 ~）
@@ -23,13 +24,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 STAMP = datetime.now().strftime("%Y%m%d-%H%M")
-#: zip 根目录名 = xun 里的 extension 名
+#: zip 根目录名 = xun 里的 extension 名 = 仓库根那个既是引擎包又是 extension 目录的目录
 PKG = "werewolf"
+EXT_DIR = ROOT / PKG
 
 SKIP_DIRS = {".git", ".dev", ".xun", "dist", "__pycache__", ".pytest_cache", ".mypy_cache"}
 SKIP_SUFFIX = {".pyc", ".pyo", ".pyd", ".log", ".pid"}
 
-INCLUDE = ("setup_extension.py", "werewolf", "README.md", "AGENTS.md", "pack.py")
+
 #: 身份卡插画（角色表的真源在 werewolf/engine/roles.py，改角色要同时改这里和资产文件；
 #: tests/test_board_cards.py 会逐个角色核对资产在位，漏了会红。）
 ROLE_ART = ("wolf", "wolf_king", "seer", "witch", "hunter", "idiot", "villager")
@@ -38,16 +40,13 @@ BANNER_ART = ("wolf", "good")
 
 REQUIRED = (
     f"{PKG}/setup_extension.py",
-    *(f"{PKG}/werewolf/assets/roles/{r}.svg" for r in ROLE_ART),
-    *(f"{PKG}/werewolf/assets/banners/{w}.svg" for w in BANNER_ART),
-    f"{PKG}/werewolf/engine/engine.py",
-    f"{PKG}/werewolf/tests/run.py",
-    f"{PKG}/README.md",
+    *(f"{PKG}/assets/roles/{r}.svg" for r in ROLE_ART),
+    *(f"{PKG}/assets/banners/{w}.svg" for w in BANNER_ART),
+    f"{PKG}/engine/engine.py",
 )
 
 
-def _files(base_item: str):
-    base = ROOT / base_item
+def _files(base: Path):
     if not base.exists():
         raise SystemExit(f"缺少要打包的内容：{base}")
     if base.is_file():
@@ -65,24 +64,32 @@ def _files(base_item: str):
 def build(out_dir: Path) -> Path:
     zip_path = out_dir / f"{PKG}-{STAMP}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for item in INCLUDE:
-            for path in _files(item):
-                zf.write(path, Path(PKG) / path.relative_to(ROOT))
+        for path in _files(EXT_DIR):          # 相对 ROOT 落位：顶层目录已经是 werewolf/
+            zf.write(path, path.relative_to(ROOT))
         zf.writestr(f"{PKG}/_packaged_from.txt", (
-            f"packaged_from: {ROOT}\n"
+            f"packaged_from: {EXT_DIR}\n"
             f"packaged_at:   {datetime.now().isoformat(timespec='seconds')}\n"
             f"python:        {sys.version.split()[0]}\n\n"
+            "这一层就是 extension 目录本身：只有运行时，没有 README/AGENTS/pack.py/tests。\n"
             "用法：解压到 {XUN_HOME}/extensions/ 下（未设 XUN_HOME 时是 ./.xun/extensions/），\n"
             f"使最终路径成为 <extensions>/{PKG}/setup_extension.py，然后在 xun 会话里发 /werewolf\n"
         ))
     return zip_path
 
 
+#: 开发期的东西不该出现在包里 —— 测试在仓库根绝对导入引擎，装好的包里没地方跑它
+NOT_IN_PACKAGE = (f"{PKG}/tests/",)
+
+
 def check(zip_path: Path) -> list[str]:
+    """这个包不合格的问题清单：必需文件缺了，或者开发期的东西混进来了。"""
     if not zip_path.is_file():
         raise SystemExit(f"文件不存在：{zip_path}")
     names = set(zipfile.ZipFile(zip_path).namelist())
-    return [name for name in REQUIRED if name not in names]
+    problems = [f"缺必需文件：{name}" for name in REQUIRED if name not in names]
+    problems += [f"开发期的东西进了包：{name}" for name in sorted(names)
+                 if name.startswith(NOT_IN_PACKAGE)]
+    return problems
 
 
 #: 在临时目录里跑的子进程脚本：照 xun 的方式造包壳、加载入口、再懒加载引擎
@@ -158,21 +165,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         target = Path(args.check)
-        missing = check(target)
+        problems = check(target)
         total = len(zipfile.ZipFile(target).namelist())
-        if missing:
-            print(f"❌ {target.name} 缺 {len(missing)} 个必需文件：{missing}")
+        if problems:
+            print(f"❌ {target.name} 不合格（{total} 个文件）：\n  " + "\n  ".join(problems))
             return 1
-        print(f"✅ {target.name} 完整（{total} 个文件，必需项全在位）")
+        print(f"✅ {target.name} 完整（{total} 个文件：必需项全在位，也没有开发期的东西）")
         return report_load(target)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = build(out_dir)
-    missing = check(zip_path)
-    if missing:
+    problems = check(zip_path)
+    if problems:
         zip_path.unlink(missing_ok=True)
-        raise SystemExit(f"打包自检失败，缺：{missing}")
+        raise SystemExit("打包自检失败：\n  " + "\n  ".join(problems))
     print(f"✅ {zip_path}（{zip_path.stat().st_size / 1024:.0f} KB）")
     smoke_code = report_load(zip_path)
     if smoke_code:

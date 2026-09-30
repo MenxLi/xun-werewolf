@@ -1,4 +1,4 @@
-"""极简测试框架（不依赖 pytest）：python -m werewolf.tests.run"""
+"""极简测试框架（不依赖 pytest）：在仓库根跑 python -m tests.run"""
 from __future__ import annotations
 
 import importlib
@@ -8,10 +8,10 @@ import random
 import sys
 import traceback
 
-from ..actors.fake import FakeActor
-from ..engine.config import GameConfig, PRESETS
-from ..engine.engine import Engine
-from ..engine.presenter import NullPresenter
+from werewolf.actors.fake import FakeActor
+from werewolf.engine.config import GameConfig, PRESETS
+from werewolf.engine.engine import Engine
+from werewolf.engine.presenter import NullPresenter
 
 def block_text(event) -> str:
     """一个播报块的文本：`InfoEvent` 直接给，`HTMLInfoEvent` 走 xun 的 `to_text()` 降级。
@@ -31,10 +31,10 @@ def info_blocks(events) -> list[str]:
 
 
 def discover_modules() -> list[str]:
-    """自动发现本目录下的 test_*.py，新增测试文件不用改这里。
+    """自动发现本目录下的 test_*.py，新增测试文件不用改这里（测试不打包，见 pack.py）。
 
-    按目录找、用 `__package__` 拼名字，因此不依赖引擎包叫 `werewolf` 还是
-    `xun_ext_werewolf.werewolf`（extension 里是后者）。
+    引擎一律 `from werewolf.…` 绝对导入，所以这一套只在仓库根跑得起来 —— 那里 `werewolf/`
+    在 sys.path 上，且和入口 `_load_engine()` 拿到的是同一份引擎。
     """
     import pkgutil
 

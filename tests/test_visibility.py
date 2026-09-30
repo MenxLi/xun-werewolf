@@ -1,11 +1,11 @@
 """可见性与快照不变量：玩家上下文只含他该看到的；同时决策的人共享同一份快照。"""
 from __future__ import annotations
 
-from ..engine.config import PRESETS
-from ..engine.decisions import WolfProposal
-from ..engine.engine import Engine
-from ..engine.events import GM, K_SPEECH, K_WOLF_VOTE, PUBLIC
-from ..engine.presenter import NullPresenter
+from werewolf.engine.config import PRESETS
+from werewolf.engine.decisions import WolfProposal
+from werewolf.engine.engine import Engine
+from werewolf.engine.events import GM, K_SPEECH, K_WOLF_VOTE, PUBLIC
+from werewolf.engine.presenter import NullPresenter
 from .harness import RecordingActor, play
 
 SIMULTANEOUS = ("candidacy", "vote", "sheriff_vote", "withdraw")
@@ -119,8 +119,8 @@ def test_recap_window_is_the_seats_own_cursor():
     私密事件不占 delta 长度，于是起点偏后，把 delta 里已经逐字给过的发言也划进摘要区间。
     这里刻意排成「公开 → 只有上帝看得见 → 公开」，反推法必然踩雷（实测 8 局重复 941 次）。
     """
-    from ..engine.build import AskBuilder
-    from ..engine.events import K_DEBUG, K_SPEECH, PUBLIC, Event
+    from werewolf.engine.build import AskBuilder
+    from werewolf.engine.events import K_DEBUG, K_SPEECH, PUBLIC, Event
 
     cfg = PRESETS[1].config.copy()
     cfg.seed = 5
@@ -178,7 +178,7 @@ def test_the_wolf_team_sees_each_other_s_votes_and_a_short_line():
     """票型和那句短理由只进狼队频道；理由被压到 14 字，别让它长成小作文。"""
     import random
 
-    from ..actors.fake import FakeActor
+    from werewolf.actors.fake import FakeActor
 
     cfg = PRESETS[2].config.copy()
     cfg.human_seat = None
@@ -211,7 +211,7 @@ def test_the_wolf_tally_reaches_wolves_and_the_reviewer_only():
     【狼队表决】那行档案跟着 `is_wolf` 走，看着像不可能漏；漏的地方在**摘要**：
     前情提要是逐座拼的，一旦把夜里的票型顺手塞进 recap，等于全场每晚免费看狼队内部表决。
     """
-    from ..actors.reviewer import Reviewer
+    from werewolf.actors.reviewer import Reviewer
 
     for seed in (1, 2):
         eng, records = _game(seed)

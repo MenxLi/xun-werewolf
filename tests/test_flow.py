@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import random
 
-from ..actors.fake import FakeActor
-from ..engine.config import GameConfig, PRESETS, RuleFlags
-from ..engine.decisions import (
+from werewolf.actors.fake import FakeActor
+from werewolf.engine.config import GameConfig, PRESETS, RuleFlags
+from werewolf.engine.decisions import (
     Ballot, Candidacy, SeerCheck, Shot, SpeakOrder, Speech, Transfer, WitchAction, WolfProposal, Withdraw,
 )
-from ..engine.engine import Engine
-from ..engine.events import (
+from werewolf.engine.engine import Engine
+from werewolf.engine.events import (
     PUBLIC, K_BADGE_DESTROYED, K_BADGE_TRANSFER, K_EXILE, K_IDIOT_REVEAL, K_SHOT, K_SPEECH, K_VOTE,
     K_VOTE_RESULT)
-from ..engine.presenter import NullPresenter
+from werewolf.engine.presenter import NullPresenter
 
 
 def engine_for(cfg: GameConfig, actors_spec: dict[int, dict]) -> Engine:
@@ -320,10 +320,10 @@ def test_word_limits_are_per_phase_but_never_cut_the_speech():
 
     截断会让场上少一条真实存在的证词，而复盘时也追不回来；超限只在上帝视角记一笔。
     """
-    from ..engine.ask import KIND_CANDIDACY, KIND_LAST_WORDS, KIND_WITHDRAW, word_limit_for
-    from ..engine.config import default_config
-    from ..engine.engine import WORD_HARD_CEILING
-    from ..engine.events import K_DEBUG, K_SHERIFF_SPEECH
+    from werewolf.engine.ask import KIND_CANDIDACY, KIND_LAST_WORDS, KIND_WITHDRAW, word_limit_for
+    from werewolf.engine.config import default_config
+    from werewolf.engine.engine import WORD_HARD_CEILING
+    from werewolf.engine.events import K_DEBUG, K_SHERIFF_SPEECH
 
     assert RuleFlags().speech_word_limit == 500
     assert RuleFlags().sheriff_word_limit == 500
@@ -361,8 +361,8 @@ def test_the_context_window_is_wide_enough_to_recall_the_game():
     """
     import inspect
 
-    from ..actors.llm_player import LLMActor
-    from ..engine.build import RECAP_EVENTS, _clip
+    from werewolf.actors.llm_player import LLMActor
+    from werewolf.engine.build import RECAP_EVENTS, _clip
     from .harness import play
 
     assert RECAP_EVENTS >= 20, "前情提要该带多少条事件"
@@ -382,7 +382,7 @@ def test_the_dead_are_told_only_whether_they_may_shoot():
     能开枪的角色只该知道「这次能不能开枪」。真死因留在上帝视角的夜结算里 —— 那是 GM 受众，
     `visible()` 决定它永远进不了任何玩家的 Ask（连死者自己的记忆也进不去）。
     """
-    from ..engine.events import K_DEATH_CAUSE, GM
+    from werewolf.engine.events import K_DEATH_CAUSE, GM
 
     def private_notes(eng: Engine, seat: int) -> list[str]:
         return [e.text for e in _events(eng, K_DEATH_CAUSE)
@@ -533,8 +533,8 @@ def test_a_tied_tally_does_not_push_the_wolf_to_the_lowest_seat():
     法官给的票型按编号升序排（`5号 1票、9号 1票`），要是演员只认文本里第一个座位，
     刚删掉的「平票取编号最小」就等于换了个地方活着。
     """
-    from ..actors.fake import _tally_leads
-    from ..engine.ask import Ask, KIND_WOLF_TARGET
+    from werewolf.actors.fake import _tally_leads
+    from werewolf.engine.ask import Ask, KIND_WOLF_TARGET
 
     note = "上一轮的票型：5号 1票、9号 1票。这一轮可以坚持，也可以改。"
     assert sorted(_tally_leads(note)) == [5, 9], _tally_leads(note)
@@ -558,9 +558,9 @@ def test_the_tally_text_the_judge_prints_is_the_text_the_wolves_read():
     「5号 2票」改成「5号 2 票」或者把「票型：」换成别的词，脚本狼就悄悄不再跟票 ——
     测试全绿，只是空刀率莫名升高。这条测试就是那根线的接头。
     """
-    from ..actors.fake import _tally_leads
-    from ..engine.engine import Engine
-    from ..engine.resolve import describe_tally, plurality
+    from werewolf.actors.fake import _tally_leads
+    from werewolf.engine.engine import Engine
+    from werewolf.engine.resolve import describe_tally, plurality
 
     for picks in ({6: 5, 8: 5, 9: 7}, {6: 1, 8: 2}, {3: 9, 4: 9, 5: 9}, {6: 11, 8: 11}):
         leaders, counts = plurality(picks, {s: 1.0 for s in picks})

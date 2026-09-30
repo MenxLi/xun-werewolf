@@ -1,9 +1,9 @@
 """纯函数结算测试。"""
 from __future__ import annotations
 
-from ..engine.config import GameConfig, RuleFlags, WIN_CITY, WIN_EDGE
-from ..engine.resolve import check_winner, next_start_seat, plurality, resolve_night, seat_after
-from ..engine.state import GameState, Player
+from werewolf.engine.config import GameConfig, RuleFlags, WIN_CITY, WIN_EDGE
+from werewolf.engine.resolve import check_winner, next_start_seat, plurality, resolve_night, seat_after
+from werewolf.engine.state import GameState, Player
 
 
 def _state(spec, flags=None, alive=None, sheriff=None):

@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import random
 
-from ..actors.fake import FakeActor
-from ..engine.config import PRESETS
-from ..engine.engine import Engine
-from ..engine.events import K_SPEAK_ORDER, K_SPEECH
-from ..engine.presenter import NullPresenter
-from ..engine.resolve import first_alive_in_direction, next_start_seat, speak_rotation
+from werewolf.actors.fake import FakeActor
+from werewolf.engine.config import PRESETS
+from werewolf.engine.engine import Engine
+from werewolf.engine.events import K_SPEAK_ORDER, K_SPEECH
+from werewolf.engine.presenter import NullPresenter
+from werewolf.engine.resolve import first_alive_in_direction, next_start_seat, speak_rotation
 from .test_flow import engine_for, make_config
 from .harness import play
 

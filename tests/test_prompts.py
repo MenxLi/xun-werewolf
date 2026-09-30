@@ -5,16 +5,16 @@
 """
 from __future__ import annotations
 
-from ..actors.prompts import ASK_TAIL, static_system, turn_prompt
-from ..actors.style import BEHAVIOR_RULES, KIND_HINT, style_text
-from ..engine.ask import (
+from werewolf.actors.prompts import ASK_TAIL, static_system, turn_prompt
+from werewolf.actors.style import BEHAVIOR_RULES, KIND_HINT, style_text
+from werewolf.engine.ask import (
     KINDS, KIND_CANDIDACY, KIND_LAST_WORDS, KIND_SEER, KIND_SHERIFF_SPEECH, KIND_SPEAK_ORDER,
     KIND_SPEECH, KIND_VOTE, KIND_WITHDRAW, KIND_WITCH, KIND_WOLF_TARGET,
 )
-from ..engine.build import AskBuilder
-from ..engine.config import PRESETS
-from ..engine.engine import Engine
-from ..engine.presenter import NullPresenter
+from werewolf.engine.build import AskBuilder
+from werewolf.engine.config import PRESETS
+from werewolf.engine.engine import Engine
+from werewolf.engine.presenter import NullPresenter
 
 #: 这些环节只会问对应身份，测试时也发给对的人
 KIND_SEAT_ROLE = {KIND_WOLF_TARGET: "wolf", KIND_WITCH: "witch", KIND_SEER: "seer"}
@@ -197,7 +197,7 @@ def test_a_compacted_history_gets_the_role_back_without_stacking():
     接回来的规则要同时躲开两种错：摘要把身份吃掉（玩家忘了自己是谁），以及每轮又接一遍
     （摘要叠摘要，system 越滚越长，缓存也照样没了）。
     """
-    from ..actors.llm_player import rebase_system
+    from werewolf.actors.llm_player import rebase_system
 
     role = "你是狼人杀里坐在 5 号位的玩家，你的身份是 预言家。"
     assert rebase_system(role, role) is None, "没人动过 system：一个字都不该重写"
@@ -219,7 +219,7 @@ def test_the_seat_agent_writes_its_system_once_per_game():
     """
     from dataclasses import replace
 
-    from ..actors.llm_player import LLMActor
+    from werewolf.actors.llm_player import LLMActor
 
     class _FakeAgent:
         def __init__(self) -> None:
@@ -329,8 +329,8 @@ def test_the_table_slang_is_offered_but_not_forced():
         assert term in text, (term, "黑话表少了这个")
     import random
 
-    from ..engine.persona import QUIRKS, sample_personas
-    from ..engine.roles import SEER, VILLAGER, WITCH, WOLF
+    from werewolf.engine.persona import QUIRKS, sample_personas
+    from werewolf.engine.roles import SEER, VILLAGER, WITCH, WOLF
 
     assignment = {1: WOLF, 2: WOLF, 3: SEER, 4: WITCH, 5: VILLAGER, 6: VILLAGER}
     jargon_users: set = set()

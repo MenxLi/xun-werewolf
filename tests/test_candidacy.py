@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import random
 
-from ..engine.config import PRESETS, GameConfig
-from ..engine.persona import ROLE_CANDID_BONUS, sample_personas
-from ..engine.roles import VILLAGER, WOLF, WOLF_KING
+from werewolf.engine.config import PRESETS, GameConfig
+from werewolf.engine.persona import ROLE_CANDID_BONUS, sample_personas
+from werewolf.engine.roles import VILLAGER, WOLF, WOLF_KING
 
 TRIALS = 400
 
@@ -93,8 +93,8 @@ def test_the_human_seat_gets_no_persona():
     """真人座位不抽人格：他的风格就是他当下的心情。人格只为 AI 存在。"""
     from dataclasses import replace
 
-    from ..engine.engine import Engine
-    from ..engine.presenter import NullPresenter
+    from werewolf.engine.engine import Engine
+    from werewolf.engine.presenter import NullPresenter
 
     base = PRESETS[1].config
     cfg = replace(base, counts=dict(base.counts), flags=replace(base.flags), human_seat=3, seed=5)
@@ -112,8 +112,8 @@ def test_speech_length_habit_is_personality_driven():
     """
     import random
 
-    from ..engine.persona import sample_personas
-    from ..engine.roles import SEER, VILLAGER, WITCH, WOLF
+    from werewolf.engine.persona import sample_personas
+    from werewolf.engine.roles import SEER, VILLAGER, WITCH, WOLF
 
     assignment = {1: WOLF, 2: WOLF, 3: SEER, 4: WITCH, 5: VILLAGER, 6: VILLAGER}
     tiers = {"40~90": 0, "100~180": 0, "200~300": 0}
@@ -139,8 +139,8 @@ def test_a_seat_holds_its_line_or_moves_it():
     """
     import random
 
-    from ..engine.persona import sample_personas
-    from ..engine.roles import SEER, VILLAGER, WITCH, WOLF
+    from werewolf.engine.persona import sample_personas
+    from werewolf.engine.roles import SEER, VILLAGER, WITCH, WOLF
 
     HOLD = "自己定的票不轻易改"
     MOVE = "改主意快"
@@ -169,8 +169,8 @@ def test_the_spotlight_rides_on_the_mic_axis():
     """
     import random
 
-    from ..engine.persona import sample_personas
-    from ..engine.roles import SEER, VILLAGER, WITCH, WOLF
+    from werewolf.engine.persona import sample_personas
+    from werewolf.engine.roles import SEER, VILLAGER, WITCH, WOLF
 
     HI, LO = "很在意风头", "很在意自己在这个局里的位置"
     assignment = {1: WOLF, 2: WOLF, 3: SEER, 4: WITCH, 5: VILLAGER, 6: VILLAGER}
@@ -196,8 +196,8 @@ def test_the_persona_draw_borrows_one_number_from_the_game_rng():
     """
     import random
 
-    from ..engine import persona
-    from ..engine.roles import SEER, VILLAGER, WOLF
+    from werewolf.engine import persona
+    from werewolf.engine.roles import SEER, VILLAGER, WOLF
 
     class Counting(random.Random):
         calls = 0
@@ -217,8 +217,8 @@ def test_an_extra_axis_would_change_nobody_but_the_seat_himself():
     """
     import random
 
-    from ..engine import persona
-    from ..engine.roles import VILLAGER, WOLF
+    from werewolf.engine import persona
+    from werewolf.engine.roles import VILLAGER, WOLF
 
     assignment = {seat: (WOLF if seat <= 2 else VILLAGER) for seat in range(1, 7)}
     before = persona.sample_personas(assignment, random.Random(20))
@@ -246,7 +246,7 @@ def test_personas_store_only_what_something_reads():
     """
     import dataclasses
 
-    from ..engine.persona import Persona
+    from werewolf.engine.persona import Persona
 
     assert {f.name for f in dataclasses.fields(Persona)} == {
         "seat", "mic_desire", "run_for_sheriff", "style"}
@@ -254,7 +254,7 @@ def test_personas_store_only_what_something_reads():
 
 def test_reasoning_discipline_is_in_the_prompt():
     """提示词里要有可判定的推理纪律，不是空喊"讲逻辑"。"""
-    from ..actors.style import BEHAVIOR_RULES
+    from werewolf.actors.style import BEHAVIOR_RULES
 
     assert "讲逻辑" in BEHAVIOR_RULES
     for needle in ("事实", "推测", "错在哪一步", "必须给出理由"):
@@ -268,11 +268,11 @@ def _knife(plan: list[list[int]]):
     `plan[i][r]` = 第 i 只狼第 r 轮投谁：**池子里的第几个**（0 起）；`-1` = 空刀；`-2` = 提队友。
     用代号不写死座位，是因为换seed狼座就变了 —— 写死会把队友投出去还以为在谈刀口。
     """
-    from ..engine.decisions import WolfProposal
-    from ..engine.engine import Engine
-    from ..engine.events import K_WOLF_VOTE
-    from ..engine.presenter import NullPresenter
-    from ..engine.state import NightRecord
+    from werewolf.engine.decisions import WolfProposal
+    from werewolf.engine.engine import Engine
+    from werewolf.engine.events import K_WOLF_VOTE
+    from werewolf.engine.presenter import NullPresenter
+    from werewolf.engine.state import NightRecord
 
     cfg = GameConfig(n_seats=9, counts={"wolf": 3, "seer": 1, "witch": 1, "villager": 4})
     engine = Engine(cfg, {}, presenter=NullPresenter(), seed=1)
@@ -373,7 +373,7 @@ def test_the_pack_sees_the_tally_between_rounds():
     assert all("票型" in seen[1] for seen in notes), [seen[1] for seen in notes]
     assert f"{pool[0]}号 1票" in notes[0][1], notes[0][1]
     # 端到端闭环：引擎拼出的那句题面，必须能被狼手里那个解析器读回同一批领先目标
-    from ..actors.fake import _tally_leads
+    from werewolf.actors.fake import _tally_leads
     assert sorted(_tally_leads(notes[0][1])) == sorted([pool[0], pool[1]]), notes[0][1]
     assert "最终决定" not in notes[0][1], "题面里不该替狼队写结论"
     for text in texts:
@@ -390,11 +390,11 @@ def test_sheriff_ballot_outside_the_pool_is_abstain():
     import random
     from dataclasses import replace
 
-    from ..actors.fake import FakeActor
-    from ..engine.decisions import Ballot, Candidacy, Withdraw
-    from ..engine.engine import Engine
-    from ..engine.events import K_SHERIFF_VOTE
-    from ..engine.presenter import NullPresenter
+    from werewolf.actors.fake import FakeActor
+    from werewolf.engine.decisions import Ballot, Candidacy, Withdraw
+    from werewolf.engine.engine import Engine
+    from werewolf.engine.events import K_SHERIFF_VOTE
+    from werewolf.engine.presenter import NullPresenter
 
     base = PRESETS[2].config
     cfg = replace(base, seed=4, flags=replace(base.flags, sheriff_enabled=True,
@@ -440,8 +440,8 @@ def test_a_seats_voice_does_not_depend_on_its_camp():
     """
     import inspect
 
-    from ..engine.persona import candid_probability, sample_personas
-    from ..engine.roles import HUNTER, SEER, VILLAGER, WITCH, WOLF, WOLF_KING
+    from werewolf.engine.persona import candid_probability, sample_personas
+    from werewolf.engine.roles import HUNTER, SEER, VILLAGER, WITCH, WOLF, WOLF_KING
 
     seats = [1, 2, 3, 4, 5, 6, 7]
     roles_a = {1: WOLF, 2: WOLF, 3: WOLF, 4: SEER, 5: WITCH, 6: HUNTER, 7: VILLAGER}

@@ -8,13 +8,17 @@
 ## 动手前后都跑一遍
 
 ```bash
-python -m werewolf.tests.run                              # 全量：脚本玩家跑，不发 LLM 请求
-WEREWOLF_UI=text python -m werewolf.tests.run             # 同一套再跑一遍纯文本形态
+python -m tests.run                                       # 全量：脚本玩家跑，不发 LLM 请求
+WEREWOLF_UI=text python -m tests.run                      # 同一套再跑一遍纯文本形态
 python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 的方式真加载一次
 ```
 
 ## 结构
 
+- **仓库根的 `werewolf/` 就是 extension 目录**：入口 `setup_extension.py` 在它根部，`engine/ actors/ ui/`
+  与 `assets/` 在旁边。装 = 整目录拷进 `extensions/`（xun 按目录名认 extension），`pack.py` 打的也只有
+  这一层 —— 这一层里不放开发期的东西，README、AGENTS、pack.py、`tests/` 都在仓库根、都不进包。
+  测试反过来绝对导入引擎（`from werewolf.engine import …`），在仓库根跑，拿到的就是入口那份引擎。
 - **代码越少越好**：不留兼容分支，不留“以后可能用得上”的参数与抽象。
 - **引擎不碰 xun**：规则、状态、可见性都在引擎层，脚本玩家要能直接驱动它跑完一局；只有演员层与显示层可以碰 xun。
 - **入口 import 时零副作用**：只注册命令，引擎懒加载且一律相对导入。不要 `sys.path` 魔法，也别让一个进程有两种导入身份（会变成两份引擎）。

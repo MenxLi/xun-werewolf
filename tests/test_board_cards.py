@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import os
 
-from ..engine.events import (
+from werewolf.engine.events import (
     K_EXILE, K_SHERIFF_VOTE, K_VOTE, K_VOTE_RESULT, Event,
 )
-from ..ui import html as H, render
-from ..ui.host import HostPresenter
+from werewolf.ui import html as H, render
+from werewolf.ui.host import HostPresenter
 from . import harness
 from .test_channels import _make_agent, _speech, _state
 
@@ -154,7 +154,7 @@ def test_role_card_svg_is_shipped_and_inline_safe():
       图缺胳膊少腿，而 HTML 本身合法，没人会发现。
     """
     import re
-    from ..engine.roles import ROLES
+    from werewolf.engine.roles import ROLES
 
     for role_id in sorted(ROLES):
         assert (H.ART_DIR / f"{role_id}.svg").is_file(), f"缺身份卡：{role_id}"   # 以角色表为准
@@ -219,7 +219,7 @@ def test_tally_is_printed_once_in_card_mode():
     """
     if "html" not in _modes():
         return
-    from ..ui import render
+    from werewolf.ui import render
 
     with _Mode():
         lines = render.render_batch(_state(), [
@@ -337,7 +337,7 @@ def test_public_board_never_reveals_the_wolf_count():
     是最后一匹。`/werewolf status` 与法官问答都走同一个 `status_lines(god_view=False)`，
     所以这一条同时守住了那两处出口。
     """
-    from ..engine.roles import ROLES
+    from werewolf.engine.roles import ROLES
     with _Mode():
         state = _state()
         state.winner = None

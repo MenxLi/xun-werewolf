@@ -38,8 +38,17 @@ class FakeCommandRegistry:
 
 
 class FakeToolBox:
+    """照 xun 的语义收起：`disable("*")` 不删工具，只是 `list_tools` 不再把它们交给模型。"""
+
     def __init__(self) -> None:
         self.tools = {"bash": object(), "read_file": object()}
+        self.disabled: list[str] = []
+
+    def disable(self, pattern: str) -> None:
+        self.disabled.append(pattern)
+
+    def list_tools(self):
+        return [] if "*" in self.disabled else list(self.tools)
 
 
 class FakeAgent:
@@ -65,7 +74,8 @@ class FakeCtx:
 
 
 # --------------------------------------------------------------------------- 加载副作用
-def test_setup_extension_only_adds_its_commands():
+def test_setup_extension_only_adds_its_command():
+    """加载时只注册 `/werewolf` 这一条 —— 其余命令（含 `/auto-say`）要等它真跑起来。"""
     module = _ext()
     agent = FakeAgent()
     tools_before = sorted(agent.toolbox.tools)
@@ -74,14 +84,17 @@ def test_setup_extension_only_adds_its_commands():
 
     module.setup_extension(FakeCtx(agent))
 
-    assert set(agent.command.commands) == {module.COMMAND_NAME, module.AUTO_COMMAND}
+    assert set(agent.command.commands) == {module.COMMAND_NAME}, \
+        "除 `/werewolf` 之外的命令不许在加载时就出现"
+    assert module.AUTO_COMMAND not in agent.command.commands, \
+        "`/auto-say` 在一局开始前只会回「没轮到你」，不许提前占补全菜单"
     assert sorted(agent.toolbox.tools) == tools_before, "不许往用户 agent 里塞工具"
     assert agent.config.model.name == config_before[0], "不许改 config"
     assert set(vars(agent)) == attrs_before, "不许给 agent 挂新属性"
 
 
-def test_the_game_stows_its_tools_and_default_commands():
-    """开局那一刻：agent 自用的工具箱与默认命令都不再响应（这条会话已被法官接管）。"""
+def test_the_judge_takes_over_the_command_surface():
+    """接管命令面：`/auto-say` 到这一步才注册，agent 自用的工具与命令都不再响应。"""
     from types import SimpleNamespace
 
     from xun import Command, CommandRegistry, ToolBox
@@ -89,17 +102,20 @@ def test_the_game_stows_its_tools_and_default_commands():
     rt = _ext()
     agent = SimpleNamespace(toolbox=ToolBox().with_defaults(),
                             command=CommandRegistry().with_defaults())
-    for name in (rt.COMMAND_NAME, rt.AUTO_COMMAND):
-        agent.command.register(Command(name=name, handler=lambda a: None, description="x"))
+    agent.command.register(Command(name=rt.COMMAND_NAME, handler=lambda a: None, description="x"))
     assert agent.toolbox.list_tools(), "夹具：默认工具箱该有工具"
     assert agent.command.get("clear") is not None, "夹具：默认命令在收起前要用得到"
+    assert agent.command.get(rt.AUTO_COMMAND) is None, "夹具：`/auto-say` 归接管这一步注册"
 
-    rt.stow_agent_tooling(agent)
+    rt.takeover_command_surface(agent)
 
     assert agent.toolbox.list_tools() == [], "工具要全部收起，不再交给模型"
     assert set(agent.command.commands) == {rt.COMMAND_NAME, rt.AUTO_COMMAND}
     assert agent.command.get("clear") is None, "默认命令要真的不再响应"
     assert agent.command.get("help") is not None, "help 由 registry 现造，留着是对的"
+
+    rt.takeover_command_surface(agent)          # 一局一命，但幂等更省心：不许把命令弄丢
+    assert set(agent.command.commands) == {rt.COMMAND_NAME, rt.AUTO_COMMAND}
 
 
 def test_extension_entry_contract():
@@ -316,6 +332,50 @@ def test_second_game_is_refused_and_leaves_the_first_one_alone():
     finally:
         rt.GameSession = real
         for instance in _FakeSession.instances:
+            instance.stop()
+        rt._games.pop(agent.identifier, None)
+
+
+def test_the_command_surface_changes_the_moment_werewolf_runs():
+    """`/werewolf` 一到手就换命令面，而且赶在后台线程起跑**之前**。
+
+    两半都要钉住：
+    - 不许太晚：收起以前写在 `play()` 里，于是得等五张开局卡片全点完 —— 中途弃卡（或向导报错）
+      就永远不收，而 takeover 钩子是构造即挂、终身不摘的。
+    - 不许太早：加载时不许有 `/auto-say`，一局没开始前它只会回一句「没轮到你」。
+    """
+    rt = _ext()
+    from xun import Command
+
+    class _SpySession(_FakeSession):
+        """记下后台线程起跑那一刻的命令面 —— 收起必须已经发生。"""
+        seen: dict = {}
+
+        def start_in_background(self):
+            type(self).seen = {"commands": set(self.agent.command.commands),
+                               "disabled": list(self.agent.toolbox.disabled)}
+            return super().start_in_background()
+
+    real, instances = rt.GameSession, _FakeSession.instances
+    _FakeSession.instances, _SpySession.seen = [], {}
+    rt.GameSession = _SpySession
+    try:
+        agent = FakeAgent(name="surface", display=object())
+        rt.setup_extension(FakeCtx(agent))
+        agent.command.register(Command(name="tools", handler=lambda a: None, description="x"))
+        assert set(agent.command.commands) == {rt.COMMAND_NAME, "tools"}
+
+        rt.start_game(agent, [])                              # 开局卡片一张都还没问
+        assert set(agent.command.commands) == {rt.COMMAND_NAME, rt.AUTO_COMMAND}, \
+            "`/werewolf` 之后只剩法官这两条：自带命令摘掉，`/auto-say` 注册出来"
+        assert "*" in _SpySession.seen["disabled"], "工具箱也在同一步收起"
+        assert _SpySession.seen["commands"] == {rt.COMMAND_NAME, rt.AUTO_COMMAND}, \
+            "收起得赶在后台线程起跑前：写回 play() 就得等开局卡片全点完"
+        assert any("/auto-say" in text for text in agent.messages), "换了命令面要告诉用户一声"
+    finally:
+        rt.GameSession = real
+        _FakeSession.instances = instances
+        for instance in _SpySession.instances:
             instance.stop()
         rt._games.pop(agent.identifier, None)
 
@@ -552,15 +612,10 @@ def test_a_finished_game_reports_stats_and_reaches_the_review():
 
     session = _fake_session(rt)
 
-    class _TB:
-        def disable(self, pattern):
-            pass                            # `stow_agent_tooling` 要收工具箱
-
-    class _Cmd:
-        commands: dict = {}
-
-    session.agent.toolbox, session.agent.command = _TB(), _Cmd()
-    session.agent.info = lambda text: None
+    # 注意这里**不**给 agent 补 toolbox / command：命令面归 `/werewolf` 那一刻接管（见
+    # test_the_command_surface_changes_the_moment_werewolf_runs），`play()` 不许再去碰它。
+    # 哪天有人把收起写回 play()，这里会直接 AttributeError —— 那是故意的。
+    session.agent.info = lambda text: None      # 只挡住那句回执
 
     class _StubReviewer:
         def __init__(self, **kw):

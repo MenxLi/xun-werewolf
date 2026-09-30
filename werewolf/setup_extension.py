@@ -557,15 +557,15 @@ class GameSession:
         return self.reviewer
 
     def discuss_with_coach(self, question: str) -> str:
-        """法官挂给 `HostPresenter` 的那个调用：局后用户说的话都到这儿。"""
-        state = self.engine.state if self.engine is not None else None
-        return self._coach().ask(question, state)
+        """局后用户说的话都到这儿（法官只做转发）。"""
+        return self._coach().ask(question, self.engine.state)
 
     def play(self, config: Any) -> None:
         E, host = self.E, self.host
         model = self.model_name or _resolve_model_name()
         self.model_name = model                  # 教练是懒建的，到时候要用同一个模型
-        host.discussible(self.discuss_with_coach)
+        # 教练在 `close_game()` 之前就挂好：复盘还在生时用户就能打字，那句话会排进队列
+        host.coach = self.discuss_with_coach
         engine = E.Engine(config, {}, presenter=host, seed=config.seed)
         engine.setup()
         self.engine = engine
@@ -591,8 +591,7 @@ class GameSession:
         calls = sum(getattr(a, "calls", 0) for a in engine.actors.values())
         failures = sum(getattr(a, "failures", 0) for a in engine.actors.values())
         host.info(f"本局共 {state.day} 天，AI 决策 {calls} 次（其中 {failures} 次需要重试）。")
-        # 复盘走讨论那条队列：它要读完整局、是全场最久的一步，这期间学员打字进来时
-        # 不能有两个线程同时用教练那个会话（生成失败由队列兜，照样能继续问）
+        # 复盘走讨论那条队列（生成失败由队列兜，之后照样能问）：见 `HostPresenter.coach_task`
         host.coach_task(lambda: self._coach().review(state))
         host.info("接下来这条会话就是复盘室：直接打字问教练（它看得到整局记录，"
                   "含夜间行动），想重看局面用 `/werewolf status`。")

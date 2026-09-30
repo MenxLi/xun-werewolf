@@ -45,8 +45,9 @@ USAGE_LONG = """开局狼人杀：在当前会话里开一局，1 个真人（�
 
 **一局一会话**：打完之后这条会话就固定是法官（复盘随时问），不再改口重开 ——
 要再开一局请点前端的「新建会话」，那才是真正把 agent 交回给你自己的方式。
-开局那一刻起，这个 agent 自己的工具箱与默认命令都收起来了（`/tools`、`/clear` 那些不再响应），
-只剩上面这几条 —— 本局你只用输入框发言，外加 `/auto-say` 让法官替你说一句。
+发出 `/werewolf` 那一刻起，这个 agent 自己的工具箱与默认命令都收起来了（`/tools`、`/clear`
+那些不再响应），只剩上面这几条 —— 本局你只用输入框发言，外加 `/auto-say` 让法官替你说一句。
+`/auto-say` 也是那一刻才注册：一局没开始之前它无事可干，不该出现在补全菜单里。
 """
 
 def _with_default(default: str, options: Sequence[str]) -> list[str]:
@@ -65,17 +66,18 @@ _lock = threading.Lock()
 
 
 def setup_extension(ctx) -> None:
-    """加载时唯一做的事：给这个 agent 注册 `/werewolf` 命令。"""
+    """加载时唯一做的事：注册 `/werewolf` 这一条命令。
+
+    `/auto-say` **不在这里**注册。一局都没开始之前，「法官替你说一句」根本无事可干，
+    把它摆进补全菜单只会误导 —— 用户以为有个开关，其实它现在只会回一句「没轮到你」。
+    所以本插件除 `/werewolf` 之外的命令一律等 `/werewolf` 真跑起来才注册，
+    同时把 agent 自用的那些摘掉：见 `takeover_command_surface()`。
+    """
     ctx.agent.command.register(Command(
         name=COMMAND_NAME,
         handler=start_game,
         description=START_DESCRIPTION,
         description_long=USAGE_LONG,
-    ))
-    ctx.agent.command.register(Command(
-        name=AUTO_COMMAND,
-        handler=auto_say,
-        description="这一句法官替你说（只管一次，用完即失效；轮到你发言时用）",
     ))
 
 
@@ -554,8 +556,7 @@ class GameSession:
                             "确认后进入第 1 夜。", title="准备开局"):
             return
 
-        stow_agent_tooling(self.agent)
-        host.info("开局。这条会话的 agent 已是法官：它的工具箱与默认命令都收起来了。"
+        host.info("开局。这条会话的 agent 已是法官：工具箱与自带命令都收着，"
                   "查局面 `/werewolf status`，这一句不想说 `/auto-say`。")
         if engine.run() == "aborted":
             return
@@ -617,25 +618,41 @@ def start_game(agent: Any, arguments: Sequence[str] | None = None) -> None:
     session = GameSession(agent, model_name=None)
     with _lock:
         _games[agent_key] = _Record(session=session)
+    # 命令面在这一刻换人：注册 `/auto-say`、摘掉 agent 自用的命令、收起工具箱。
+    # 放在登记之后 —— 不然 `/auto-say` 已经能点，它的 handler 却还查不到这一局，
+    # 只会回「当前会话没有狼人杀」。也不放在 `play()` 里：那要等五张开局卡片全点完，
+    # 中途弃卡就永远不收，而接管可是终身的。
+    takeover_command_surface(agent)
     session.start_in_background()
 
     # 只回执一句：怎么用交给法官的欢迎卡（这里以前抄了一份，命令改了就成了过期文案）
     agent.info("狼人杀开始了：这个会话从现在起由法官接管 —— 开局设置一张张卡片问你，"
-               "发言直接发在输入框里。一局一会话：打完了它还在，复盘随时问。")
+               "发言直接发在输入框里。这个 agent 自用的命令与工具箱已收起，"
+               "新注册出来的 `/auto-say` 是让法官替你说一句。"
+               "一局一会话：打完了它还在，复盘随时问。")
 
 
-def stow_agent_tooling(agent: Any) -> None:
-    """开局后收起 agent 自用的工具箱与命令：这条会话已被法官接管，那些一律用不上。
+def takeover_command_surface(agent: Any) -> None:
+    """`/werewolf` 一到手就把这条会话的命令面换成法官那两条：注册 `/auto-say`、
+    摘掉其余一切命令、收起工具箱。这条会话已被法官接管，agent 自用的那些一律用不上。
 
     工具：`ToolBox.disable("*")`（`toolbox.py:135`），`list_tools` 随即不再把它们交给模型，
       下一次请求自然生效。xun 没有"注销工具"的 API，也不需要还原 —— 接管是终身的（一局一命），
       要拿回自己的 agent 请新建会话。
     命令：`CommandRegistry` 只有公开的 `commands` 字典（`command.py:101`），没有注销/隐藏 API，
       所以把不属于本插件的直接摘掉。`/help` 由 registry 现造（`command.py:121-131`），摘掉的那些
-      它也不再列出来。注意前端只在切 agent/会话时拉一次命令表（`App.vue:109-123`），所以补全菜单
-      要等页面重载才变短；这里保证的是"真的不再响应"。
+      它也不再列出来；`/api/commands/<agent_id>` 读的就是这个活的字典，摘完立刻少几条（实测过）。
+      但**前端不会被通知「命令表变了」**：xun 没有这类播报事件，网页只在切 agent/会话时拉一次，
+      外加输入框里是一个光秃秃的 `/命令` 时才防抖重拉。所以补全菜单可能还挂着几条已经死掉的命令，
+      那是前端的陈旧快照而不是这里没摘掉 —— 点上去只会得到 `Unknown command`。
     """
     agent.toolbox.disable("*")
+    if AUTO_COMMAND not in agent.command.commands:
+        agent.command.register(Command(
+            name=AUTO_COMMAND,
+            handler=auto_say,
+            description="这一句法官替你说（只管一次，用完即失效；轮到你发言时用）",
+        ))
     keep = {COMMAND_NAME, AUTO_COMMAND}
     for name in [n for n in agent.command.commands if n not in keep]:
         agent.command.commands.pop(name)

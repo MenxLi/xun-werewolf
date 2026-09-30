@@ -598,6 +598,134 @@ class _ScriptedSeat:
         pass
 
 
+class _StubCoach:
+    """假复盘教练：记住每次调用，好让我们看住「局末不 finalize，cleanup 才收」。"""
+
+    instances: list["_StubCoach"] = []
+
+    def __init__(self, **kw) -> None:
+        self.reviews: list[object] = []
+        self.questions: list[tuple[str, object]] = []
+        self.finalized = False
+        type(self).instances.append(self)
+
+    def review(self, state):
+        self.reviews.append(state)
+        return "## 复盘报告\n\n第 3 夜那把刀决定了胜负。"
+
+    def ask(self, question, state=None):
+        self.questions.append((question, state))
+        return "那天刀你，是因为警徽在你身上。"
+
+    def finalize(self):
+        self.finalized = True
+
+
+def _play_a_scripted_game(rt) -> tuple:
+    """真跑完一局（脚本座位、假教练）。返回 (session, coach, restore) —— 桩必须还回去，
+    因为 `session.E` 是全进程那一份引擎命名空间，改它会漏给别的测试。"""
+    from werewolf.engine.config import PRESETS
+
+    session = _fake_session(rt)
+    _StubCoach.instances = []
+    saved = {name: getattr(session.E, name) for name in ("LLMActor", "Reviewer")}
+    session.E.LLMActor, session.E.Reviewer = _ScriptedSeat, _StubCoach
+    session.host.confirm = lambda *a, **k: True
+    session.host.wait_text = lambda **k: "我先听后面的人怎么说。"
+    session.agent.info = lambda text: None
+    session.coach_tasks: list[bool] = []          # 复盘有没有**经队列**生成（见下面那条断言）
+    real_task = session.host.coach_task
+    session.host.coach_task = lambda work: (                     # type: ignore[method-assign]
+        session.coach_tasks.append(callable(work)), real_task(work))[0]   # noqa: E501
+    cfg = PRESETS[2].config.copy()
+    cfg.seed, cfg.human_seat = 11, 4
+
+    def restore() -> None:
+        for name, value in saved.items():
+            setattr(session.E, name, value)
+
+    try:
+        session.play(cfg)
+    except BaseException:
+        restore()
+        raise
+    return session, _StubCoach.instances[-1], restore
+
+
+def test_after_the_game_the_session_turns_into_a_review_room():
+    """局打完了这条会话变成复盘室：打字进教练，而且教练**还活着**。
+
+    局末就把教练 finalize 掉，「讨论」会退化成「每次重新问一遍模型」—— 前面聊过的全没了。
+    所以钉两件事：局末与 `release_players()` 都不许收它，`cleanup()` 才是收尾点。
+    """
+    rt = _ext()
+    session, coach, restore = _play_a_scripted_game(rt)
+    try:
+        assert coach.reviews, "一局打完了却没生成复盘"
+        assert session.coach_tasks == [True], \
+            "复盘必须经 `coach_task` 队列生成：就地调就等于允许复盘期间有人并发用教练那个会话"
+        assert session.host.game_over, "引擎都返回了，法官还说这局没结束"
+        assert not coach.finalized, "复盘教练不许在局末被收掉：局后的讨论靠它的会话记忆"
+
+        session.release_players()                 # 座位 agent 收掉了，教练不该跟着收
+        assert not coach.finalized, "release_players 把教练一起收了"
+
+        session.host.on_user_message(["第 2 天你们为什么刀我"])
+        assert len(coach.questions) == 1, coach.questions
+        question, state = coach.questions[0]
+        assert question == "第 2 天你们为什么刀我"
+        assert state is session.engine.state, "教练得拿到这一局的局面（复盘没生成也能答）"
+    finally:
+        restore()
+        session.cleanup()
+    assert coach.finalized, "cleanup 才是教练的收尾点"
+
+
+def test_the_coach_workspace_survives_the_end_of_the_game():
+    """教练的工作目录得活到讨论结束：它一被 rmtree，会话文件就没了，讨论变失忆。"""
+    rt = _ext()
+    session = _fake_session(rt)
+    try:
+        (session.root_dir / "review").mkdir(exist_ok=True)
+        (session.root_dir / "review" / "conversation.json").write_text("{}")
+        session.release_players()
+        assert (session.root_dir / "review").exists(), "release_players 把教练的工作目录删了"
+    finally:
+        session.cleanup()
+    assert not session.root_dir.exists(), "cleanup 还是要整目录收干净"
+
+
+def test_a_stopped_game_can_still_be_discussed():
+    """中途终止（engine 返回 aborted）也一样开讨论口子：判定不能只看 `state.finished`。"""
+    rt = _ext()
+    from werewolf.engine.config import PRESETS
+
+    session = _fake_session(rt)
+    _StubCoach.instances = []
+    saved = {name: getattr(session.E, name) for name in ("Engine", "LLMActor", "Reviewer")}
+
+    class _Aborts(saved["Engine"]):
+        def run(self):
+            return "aborted"                      # 等价于 `/werewolf stop` 之后的引擎返回
+
+    session.E.Engine, session.E.LLMActor, session.E.Reviewer = _Aborts, _ScriptedSeat, _StubCoach
+    session.host.confirm = lambda *a, **k: True
+    session.agent.info = lambda text: None
+    try:
+        cfg = PRESETS[2].config.copy()
+        cfg.seed, cfg.human_seat = 5, 3
+        session.play(cfg)
+        assert session.host.game_over, "终止局没开讨论口子"
+        session.host.on_user_message(["最后那次投票我没看懂"])
+        coach = _StubCoach.instances[-1]           # 教练是懒建的：第一次讨论才建
+        assert coach.reviews == [], "终止局不该硬生成一份复盘"
+        assert coach.questions, "终止局问不了刚才那几夜"
+    finally:
+        for name, value in saved.items():
+            setattr(session.E, name, value)
+        session.cleanup()
+
+
 def test_a_finished_game_reports_stats_and_reaches_the_review():
     """一局**正常打完**之后那几步也得跑：统计要读引擎里那份演员表，复盘必须真出来。
 

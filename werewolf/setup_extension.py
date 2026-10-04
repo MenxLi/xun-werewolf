@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
-from xun import Command
+from xun import Command, extension_attr
 
 COMMAND_NAME = "werewolf"
 AUTO_COMMAND = "auto-say"
@@ -67,7 +67,7 @@ def default_hint(default: str) -> str:
 _games: dict[str, "_Record"] = {}
 _lock = threading.Lock()
 
-
+@extension_attr(min_api_version="1.3.0", max_api_version="1.3.0")
 def setup_extension(ctx) -> None:
     """加载时唯一做的事：注册 `/werewolf` 这一条命令。
 

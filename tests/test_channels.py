@@ -24,6 +24,7 @@ from werewolf.ui import render
 from . import harness
 from werewolf.ui.host import REVIEWER, HostPresenter
 from xun.display_abstract import AgentInfo, DisplayAbstract, DisplayEvent
+from xun.conversation import Conversation
 
 
 def _make_display():
@@ -59,28 +60,13 @@ class _StubHooks:
             fn(args)
 
 
-class _StubConversation:
-    """会话消息表，只实现接管需要的 `pop_from_last_user_message`。"""
-
-    def __init__(self) -> None:
-        self.messages: list[dict] = []
-
-    def pop_from_last_user_message(self, inclusive: bool = True) -> list[dict]:
-        for index in range(len(self.messages) - 1, -1, -1):
-            if self.messages[index].get("role") == "user":
-                start = index if inclusive else index + 1
-                popped = self.messages[start:]
-                del self.messages[start:]
-                return popped
-        return []
-
-
 class _StubAgent:
     """够用的 agent 桩：法官只碰 display / get_choice / hooks / conversation / cancel_event。
 
     `get_choice` 和 `execute` 都照 xun 的真实行为写：auto-confirm 的判断在显示层里、
     `before_execution` 早于显示层、`takeover_result` 非 None 就跳过整个 loop 不调模型。
-    桩一旦不像真的，测出来的就只是桩自己的故事 —— 尤其 auto_confirm 那条。
+    桩一旦不像真的，测出来的就只是桩自己的故事 —— 尤其 auto_confirm 那条。会话因此直接用
+    xun 真的那个：消息是类型化的（xun 1.3），法官读的是真消息类才说明它真读得对。
     """
 
     def __init__(self, display=None, *, auto_confirm: bool = False) -> None:
@@ -91,7 +77,7 @@ class _StubAgent:
                                     description="", workdir=Path.cwd())
         self.workspace = SimpleNamespace(workdir=Path.cwd())
         self.hooks = SimpleNamespace(before_execution=_StubHooks())
-        self.conversation = _StubConversation()
+        self.conversation = Conversation()
         self.cancel_event = threading.Event()
         # 执行态（xun 的 `cancellable_execution`）：法官包不包这段等待，前端就照着显示
         # 「运行中」/「空闲」。桩照真实语义写：可重入、只有最外层退出才真的算闲下来。
@@ -126,7 +112,7 @@ class _StubAgent:
         return SimpleNamespace(choice=self.display.get_choice(request), source="user")
 
     def instruct(self, text: str) -> "_StubAgent":
-        self.conversation.messages.append({"role": "user", "content": text})
+        self.conversation.add_user_message(text)
         return self
 
     def execute(self) -> str:

@@ -16,6 +16,8 @@ from werewolf.engine.config import PRESETS
 from werewolf.engine.engine import Engine
 from werewolf.engine.presenter import NullPresenter
 
+from xun.conversation import Conversation
+
 #: 这些环节只会问对应身份，测试时也发给对的人
 KIND_SEAT_ROLE = {KIND_WOLF_TARGET: "wolf", KIND_WITCH: "witch", KIND_SEER: "seer"}
 
@@ -215,20 +217,21 @@ def test_a_compacted_history_gets_the_role_back_without_stacking():
 def test_the_seat_agent_writes_its_system_once_per_game():
     """接线也得钉住：`_decide` 每轮重写 system 是这场改造要拔掉的那颗钉子。
 
-    这里不用真 agent（那要模型 key），只塞一个记录写入次数的假 agent 进 `_ensure_system`。
+    这里不用真 agent（那要模型 key），但**会话是 xun 真的那个**：xun 1.3 起会话消息是类型化的，
+    桩要是自己编一张 dict 消息表，测出来的就只是桩自己的故事（那次升级当场就该红）。
     """
     from dataclasses import replace
 
-    from werewolf.actors.llm_player import LLMActor
+    from werewolf.actors.llm_player import LLMActor, current_system
 
     class _FakeAgent:
         def __init__(self) -> None:
-            self.conversation = type("C", (), {"messages": [{"role": "system", "content": ""}]})()
+            self.conversation = Conversation()
             self.writes = 0
 
         def system(self, content: str) -> None:
             self.writes += 1
-            self.conversation.messages[0]["content"] = content
+            self.conversation.set_system_message_content(content)
 
     eng = _engine()
     builder = AskBuilder(eng.state, eng.stances)
@@ -246,12 +249,53 @@ def test_the_seat_agent_writes_its_system_once_per_game():
     actor._ensure_system(replace(ask, day=6))
     assert actor.agent.writes == 1, f"一局里 system 被写了 {actor.agent.writes} 次"
 
-    actor.agent.conversation.messages[0]["content"] = "压缩摘要：第 3 天死了 2 号"
+    # auto_compact 压缩时就是这样把摘要盖在 messages[0] 上的（xun 的 conversation.compact）
+    actor.agent.conversation.set_system_message_content("压缩摘要：第 3 天死了 2 号",
+                                                        is_compressed=True)
     actor._ensure_system(ask)
     assert actor.agent.writes == 2, "auto_compact 顶掉了设定，要接回来"
-    assert actor.agent.conversation.messages[0]["content"].startswith(actor.static_system)
+    head = current_system(actor.agent.conversation)
+    assert head and head.startswith(actor.static_system), "设定要接回开头，摘要留在后面"
     actor._ensure_system(ask)
     assert actor.agent.writes == 2, "接回来一次就够了，别又变成每轮重写"
+
+
+def test_the_hard_trim_pins_the_head_and_starts_the_tail_on_a_user_message():
+    """兜底硬顶剪的是尾巴：开头钉住的几条不许动，剪完要从一条 user 开始。
+
+    会话同样是 xun 真的那个（消息是类型化的）：`head=1` 是座位（只钉 system），
+    `head=2` 是复盘教练（system 与那份对局记录都不许剪）。
+    """
+    from werewolf.actors.llm_player import trim_conversation
+    from xun.conversation_message import RawOpenAIMessage, SystemPrompt, UserMessage
+
+    def convo(extra_head: int = 1, trailing_assistant: bool = False) -> Conversation:
+        conv = Conversation()
+        conv.set_system_message_content("角色设定")
+        if extra_head == 2:
+            conv.add_user_message("=== 对局记录 ===\n第 1 天……")
+        for round_no in range(6):
+            conv.add_user_message(f"法官提问 {round_no}")
+            conv.messages.append(RawOpenAIMessage(
+                raw={"role": "assistant", "content": f"本轮决定 {round_no}"}))
+        if trailing_assistant:
+            conv.messages.append(RawOpenAIMessage(raw={"role": "assistant", "content": "自言自语"}))
+        return conv
+
+    seat = convo()
+    trim_conversation(seat, char_budget=0, keep_pairs=2, head=1)
+    assert isinstance(seat.messages[0], SystemPrompt), "system 被剪掉了：玩家会忘了自己是谁"
+    assert [m.role for m in seat.messages[1:]] == ["user", "assistant", "user", "assistant"]
+
+    coach = convo(extra_head=2)
+    trim_conversation(coach, char_budget=0, keep_pairs=2, head=2)
+    assert isinstance(coach.messages[1], UserMessage)
+    assert coach.messages[1].text.startswith("=== 对局记录 ==="), "剪掉记录等于让教练凭印象下棋"
+    assert len(coach.messages) == 6 and coach.messages[-1].role == "assistant"
+
+    loose = convo(trailing_assistant=True)
+    trim_conversation(loose, char_budget=0, keep_pairs=2, head=1)
+    assert loose.messages[1].role == "user", "剪完以 assistant 开头，有的 provider 直接 400"
 
 
 def test_the_witch_prompt_offers_only_the_antidote_the_engine_says_she_has():

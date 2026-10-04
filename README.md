@@ -40,7 +40,7 @@ ln -s "$(pwd)/werewolf" "$XUN_HOME_DIR/extensions/werewolf"   # 仓库里这一�
 
 或打包后解到 `$XUN_HOME/extensions/`：`unzip dist/werewolf-<时间戳>.zip -d "$XUN_HOME_DIR/extensions/"`。
 zip 顶层就是 `werewolf/`，里面只有运行时（引擎、卡片、SVG 资产）—— README、AGENTS、pack.py、`tests/` 留在仓库根，不进包。
-前提：xun 里配好了模型与 key（AI 座位真的会调模型）、**Python 3.12+**（照 xun 的 `requires-python`）。
+前提：xun 里配好了模型与 key（AI 座位真的会调模型）、**Python 3.12+**（照 xun 的 `requires-python`）、**xun 1.3+**（会话消息在 1.3 是类型化的消息类，插件按最新源码的 xun 构建，不留旧版分支）。
 
 ## 玩
 
@@ -129,7 +129,7 @@ xun 在 ExecutionScope 进出时广播 `AgentRunningStart/EndEvent` —— 新�
 期间草稿照样发得出去。
 
 ```bash
-python -m tests.run          # 197 项 / 11 套件，全部用脚本玩家，不发一次 LLM 请求
+python -m tests.run          # 198 项 / 11 套件，全部用脚本玩家，不发一次 LLM 请求
 WEREWOLF_UI=text python -m tests.run               # 同一套再跑一遍纯文本形态
 ```
 

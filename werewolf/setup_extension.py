@@ -132,13 +132,15 @@ def _load_engine() -> Any:
 
 
 def _broken_install_hint(exc: BaseException) -> str:
-    """装错了要说清三件事：缺什么、入口现在在哪、能照抄的修法。"""
+    """装错了要说清四件事：缺什么、入口现在在哪、能照抄的修法，以及 xun 太旧也是候选原因。"""
     return (
         "导入狼人杀引擎失败，这份 extension 不完整：引擎子包（`engine/ actors/ ui/ assets/`）"
         "必须和入口 `setup_extension.py` 在同一个 `werewolf/` 目录里，靠相对导入进来 —— "
         "装好后这里应当看得到 `extensions/werewolf/engine/engine.py`。\n\n"
         f"入口现在在：`{Path(__file__)}`\n"
         f"底层报错：`{type(exc).__name__}: {exc}`\n\n"
+        "也可能是 **xun 太旧**：本插件按 xun 最新源码构建（1.3 起会话消息是类型化的消息类）—— "
+        "先确认手头的 xun 已经更新到最新，再照下面的修法装。\n\n"
         "修法是**把整个 `werewolf/` 目录**放到 extension 位置（目录名叫 `werewolf`，别只拷入口）：\n"
         "  `cp -r <本仓库>/werewolf <XUN_HOME>/extensions/werewolf`\n"
         "  或 `unzip werewolf-<时间戳>.zip -d <XUN_HOME>/extensions/`"

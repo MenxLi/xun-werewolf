@@ -6,6 +6,7 @@ from typing import Any
 
 from xun import Agent, NullDisplay, ToolBox, Workspace
 from xun.config import load_config
+from xun.conversation_message import SystemPrompt
 
 from ..engine.ask import Ask, KINDS
 from ..engine.config import GameConfig
@@ -18,12 +19,27 @@ def rebase_system(current: str | None, static: str) -> str | None:
     唯一会动它的是 xun 的 auto_compact：它把摘要写进 `messages[0]`，连角色设定一起盖掉。
     这里把设定放回开头、摘要接在后面 —— 平时那条 system 完全不动，provider 的 KV 前缀缓存
     一路命中；压缩之后角色设定也不会丢。再压缩一次会把整条 system 换成新摘要，那时再接一次。
+
+    接回来走的是 `agent.system()`，`is_compressed` 因此被复位：xun 那份「历史已压缩」的说明
+    会把这段角色设定当成「摘要」来讲（「你是一个正在和用户聊天的助手」），而座位每轮都另外
+    收到前情提要 —— 玩家身份比那份说明重要，宁可不要它。
     """
     text = (current or "").strip()
     wanted = static.strip()
     if text == wanted or text.startswith(wanted):
         return None             # 没被动过；或就是我们上次写的那份（含已接回的摘要），别再叠一遍
     return static if not text else f"{static}\n\n## 前情摘要（更早的会话已被压缩）\n{text}"
+
+
+def current_system(conv: Any) -> str | None:
+    """会话开头那条 system 的正文；开头不是 system 消息就返回 None。
+
+    读 `SystemPrompt.content` 而不是 `completion_param()`：后者会把 xun 的持久段落
+    （`AGENTS.md` 那一节）拼在后面，而那段不是被压缩吃掉的东西，不该参与
+    「角色设定还在不在」的判断。
+    """
+    head = conv.messages[0] if conv.messages else None
+    return head.content if isinstance(head, SystemPrompt) else None
 
 
 def hard_char_budget(cfg: Any) -> int:
@@ -43,12 +59,12 @@ def trim_conversation(conv: Any, char_budget: int, keep_pairs: int, head: int = 
     if conv.estimated_message_length() <= char_budget:
         return
     messages = conv.messages
-    keep = head if messages and messages[0].get("role") == "system" else 0
+    keep = head if messages and messages[0].role == "system" else 0
     if len(messages) <= keep + 2 * keep_pairs:
         return
     tail = messages[-(2 * keep_pairs):]
     # 剪完得从一条 user 开始：留着以 assistant 开头的会话，有的 provider 直接 400
-    tail = tail[next((i for i, m in enumerate(tail) if m.get("role") == "user"), 0):]
+    tail = tail[next((i for i, m in enumerate(tail) if m.role == "user"), 0):]
     conv.messages[:] = messages[:keep] + tail
 
 
@@ -107,9 +123,7 @@ class LLMActor:
                                                self.persona_style, self.level)
             self.agent.system(self.static_system)
             return
-        messages = self.agent.conversation.messages
-        head = messages[0] if messages and messages[0].get("role") == "system" else {}
-        rebuilt = rebase_system(str(head.get("content") or "") or None, self.static_system)
+        rebuilt = rebase_system(current_system(self.agent.conversation), self.static_system)
         if rebuilt is not None:
             self.agent.system(rebuilt)
 

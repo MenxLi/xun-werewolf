@@ -92,8 +92,9 @@ def _coalesce(items: Sequence[Any]) -> list[H.Part]:
 
 
 def _text_of(message: Any) -> str:
-    """一条 chat message 里的纯文本（content 可能是字符串，也可能是带 image_url 的分块）。"""
-    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    """一条消息里的纯文本：xun 的类型化消息各自 `completion_param()` 出 content，
+    它可能是字符串，也可能是带 image_url 的分块。"""
+    content = message.completion_param().get("content", "")
     if isinstance(content, str):
         return content
     if isinstance(content, list):

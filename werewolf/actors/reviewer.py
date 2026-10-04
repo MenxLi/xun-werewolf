@@ -14,7 +14,7 @@ from xun.config import load_config
 
 from ..engine.events import GM, K_WOLF_VOTE, PUBLIC
 from ..engine.state import GameState
-from .llm_player import hard_char_budget, rebase_system, trim_conversation
+from .llm_player import current_system, hard_char_budget, rebase_system, trim_conversation
 
 REVIEW_SYSTEM = (
     "你是一位资深狼人杀教练。学员刚打完一局，你手里有这局的**上帝视角**对局记录"
@@ -87,9 +87,7 @@ class Reviewer:
             self.static_system = REVIEW_SYSTEM
             self.agent.system(REVIEW_SYSTEM)
             return
-        messages = self.agent.conversation.messages
-        top = messages[0] if messages and messages[0].get("role") == "system" else {}
-        rebuilt = rebase_system(str(top.get("content") or "") or None, self.static_system)
+        rebuilt = rebase_system(current_system(self.agent.conversation), self.static_system)
         if rebuilt is not None:
             self.agent.system(rebuilt)
 

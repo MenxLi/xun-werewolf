@@ -218,20 +218,27 @@ def test_the_seat_agent_writes_its_system_once_per_game():
     """接线也得钉住：`_decide` 每轮重写 system 是这场改造要拔掉的那颗钉子。
 
     这里不用真 agent（那要模型 key），但**会话是 xun 真的那个**：xun 1.3 起会话消息是类型化的，
-    桩要是自己编一张 dict 消息表，测出来的就只是桩自己的故事（那次升级当场就该红）。
+    1.4 起 `set_system_message_content` 又不再默认复位 `is_compressed` —— 桩要是自己编一张消息
+    表、或自己实一份写 system，这类事当场就测不到。
     """
     from dataclasses import replace
 
     from werewolf.actors.llm_player import LLMActor, current_system
 
-    class _FakeAgent:
+    class _CountingConversation(Conversation):
+        """只多一个计数器：system 被写了几次（会话本身仍是 xun 真的那个）。"""
+
         def __init__(self) -> None:
-            self.conversation = Conversation()
+            super().__init__()
             self.writes = 0
 
-        def system(self, content: str) -> None:
+        def set_system_message_content(self, content: str, is_compressed: bool | None = None):
             self.writes += 1
-            self.conversation.set_system_message_content(content)
+            super().set_system_message_content(content, is_compressed=is_compressed)
+
+    class _FakeAgent:
+        def __init__(self) -> None:
+            self.conversation = _CountingConversation()
 
     eng = _engine()
     builder = AskBuilder(eng.state, eng.stances)
@@ -243,21 +250,26 @@ def test_the_seat_agent_writes_its_system_once_per_game():
     actor.game_config = eng.state.config
     actor.role_id, actor.persona_style, actor.level = "seer", "稳健、按局面行事。", "balanced"
     actor.agent = _FakeAgent()
+    conv = actor.agent.conversation
 
+    # 数的是「演员写了几次」：模拟压缩那一次也算在同一个计数器上，所以每段都取增量
+    writes = conv.writes
     for _round in range(3):
         actor._ensure_system(ask)
     actor._ensure_system(replace(ask, day=6))
-    assert actor.agent.writes == 1, f"一局里 system 被写了 {actor.agent.writes} 次"
+    assert conv.writes - writes == 1, f"一局里 system 被写了 {conv.writes - writes} 次"
 
     # auto_compact 压缩时就是这样把摘要盖在 messages[0] 上的（xun 的 conversation.compact）
-    actor.agent.conversation.set_system_message_content("压缩摘要：第 3 天死了 2 号",
-                                                        is_compressed=True)
+    conv.set_system_message_content("压缩摘要：第 3 天死了 2 号", is_compressed=True)
+    writes = conv.writes
     actor._ensure_system(ask)
-    assert actor.agent.writes == 2, "auto_compact 顶掉了设定，要接回来"
-    head = current_system(actor.agent.conversation)
+    assert conv.writes - writes == 1, "auto_compact 顶掉了设定，要接回来"
+    head = current_system(conv)
     assert head and head.startswith(actor.static_system), "设定要接回开头，摘要留在后面"
+    assert conv.messages[0].is_compressed is False, \
+        "接回设定时要显式把「已压缩」写回 False：1.4 起写 system 不再顺手复位它"
     actor._ensure_system(ask)
-    assert actor.agent.writes == 2, "接回来一次就够了，别又变成每轮重写"
+    assert conv.writes - writes == 1, "接回来一次就够了，别又变成每轮重写"
 
 
 def test_the_hard_trim_pins_the_head_and_starts_the_tail_on_a_user_message():

@@ -57,8 +57,12 @@ python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 
   全部进那条**新的** user 消息。唯一允许重写 system 的是历史压缩（它把摘要盖在 `messages[0]`
   上），接回来时把设定放前面、摘要放后面，且不许叠第二层。
 - **会话消息按 xun 的类型化消息类读**：`msg.role`、`SystemPrompt.content`、`completion_param()` ——
-  xun 1.3 起 `conversation.messages` 里不是 dict，写 `msg.get("role")` 会在第一次决策就炸。测试里的
+  `conversation.messages` 里不是 dict，写 `msg.get("role")` 会在第一次决策就炸。测试里的
   会话桩也因此直接用 xun 真的那个 `Conversation`（桩不像真的就测不到这类事）。
+- **1.4 的两个名字别再写错**：执行态的上下文管理器是 `run_scope`（旧名 cancellable_execution），
+  卡片跳过自动确认的入参是 `skip_auto_confirm`（旧名带下划线）。另外 1.4 起
+  `agent.system()` **不再顺手复位** `is_compressed`：接回角色设定时必须显式写 False
+  （`llm_player.write_system`），否则 xun 会把整条 system 当「已压缩的历史」包进它那份助手说明。
 - 长会话的历史压缩交给 xun 的 auto_compact；插件里的字符上限只是阈值之上的兜底硬顶，
   剪完的老会话要停在一条 user 消息上（有的 provider 不接受以 assistant 开头的会话）。
 - **别顺手调小记忆旋钮**（提要带几条事件、每条留多少字、滚动窗口留几轮）：这三个数决定玩家还记不记得前面谁说过什么，下限钉在测试里。

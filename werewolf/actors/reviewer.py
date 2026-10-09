@@ -14,7 +14,7 @@ from xun.config import load_config
 
 from ..engine.events import GM, K_WOLF_VOTE, PUBLIC
 from ..engine.state import GameState
-from .llm_player import current_system, hard_char_budget, rebase_system, trim_conversation
+from .llm_player import current_system, hard_char_budget, rebase_system, trim_conversation, write_system
 
 REVIEW_SYSTEM = (
     "你是一位资深狼人杀教练。学员刚打完一局，你手里有这局的**上帝视角**对局记录"
@@ -85,11 +85,11 @@ class Reviewer:
     def _ensure_system(self) -> None:
         if not self.static_system:
             self.static_system = REVIEW_SYSTEM
-            self.agent.system(REVIEW_SYSTEM)
+            write_system(self.agent, REVIEW_SYSTEM)
             return
         rebuilt = rebase_system(current_system(self.agent.conversation), self.static_system)
         if rebuilt is not None:
-            self.agent.system(rebuilt)
+            write_system(self.agent, rebuilt)
 
     def _answer(self, text: str) -> str:
         """问一句答一句；失败就抛，由法官决定怎么告诉用户（不许把话吞掉）。"""

@@ -20,7 +20,7 @@ def rebase_system(current: str | None, static: str) -> str | None:
     这里把设定放回开头、摘要接在后面 —— 平时那条 system 完全不动，provider 的 KV 前缀缓存
     一路命中；压缩之后角色设定也不会丢。再压缩一次会把整条 system 换成新摘要，那时再接一次。
 
-    接回来走的是 `agent.system()`，`is_compressed` 因此被复位：xun 那份「历史已压缩」的说明
+    接回来时 `is_compressed` 必须显式复位（见 `write_system`）：xun 那份「历史已压缩」的说明
     会把这段角色设定当成「摘要」来讲（「你是一个正在和用户聊天的助手」），而座位每轮都另外
     收到前情提要 —— 玩家身份比那份说明重要，宁可不要它。
     """
@@ -40,6 +40,16 @@ def current_system(conv: Any) -> str | None:
     """
     head = conv.messages[0] if conv.messages else None
     return head.content if isinstance(head, SystemPrompt) else None
+
+
+def write_system(agent: Any, content: str) -> None:
+    """把 system 写进会话开头，并显式把 `is_compressed` 复位成 False。
+
+    1.4 起 `agent.system()` 不再动这个标记（`set_system_message_content` 的 `is_compressed`
+    默认 None = 保持原样），而 auto_compact 刚盖过摘要时它是 True —— 那样 xun 会把整条 system
+    包进它那份「历史已压缩」说明里当摘要讲（`COMPACTED_SYSTEM_PROMPT`），玩家身份就被讲没了。
+    """
+    agent.conversation.set_system_message_content(content, is_compressed=False)
 
 
 def hard_char_budget(cfg: Any) -> int:
@@ -116,16 +126,16 @@ class LLMActor:
         """第一次决定时写 system，之后不再重写 —— 每轮重写等于每轮打掉整个前缀缓存。
 
         设定只能由第一次那份 `Ask` 生成（座位号与狼队友从发牌起就没变过），所以这里必须
-        幂等：同一座位问一百次，`agent.system()` 也只该被调一次，除非有人动了 system。
+        幂等：同一座位问一百次，system 也只该被写一次，除非有人动了它。
         """
         if self.static_system is None:
             self.static_system = static_system(ask, self.game_config, self.role_id,
                                                self.persona_style, self.level)
-            self.agent.system(self.static_system)
+            write_system(self.agent, self.static_system)
             return
         rebuilt = rebase_system(current_system(self.agent.conversation), self.static_system)
         if rebuilt is not None:
-            self.agent.system(rebuilt)
+            write_system(self.agent, rebuilt)
 
     def _trim(self) -> None:
         trim_conversation(self.agent.conversation, self.char_budget, self.keep_pairs)

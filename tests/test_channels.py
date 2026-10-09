@@ -79,7 +79,7 @@ class _StubAgent:
         self.hooks = SimpleNamespace(before_execution=_StubHooks())
         self.conversation = Conversation()
         self.cancel_event = threading.Event()
-        # 执行态（xun 的 `cancellable_execution`）：法官包不包这段等待，前端就照着显示
+        # 执行态（xun 的 `run_scope`）：法官包不包这段等待，前端就照着显示
         # 「运行中」/「空闲」。桩照真实语义写：可重入、只有最外层退出才真的算闲下来。
         self.running = False
         self.run_depth = 0
@@ -87,7 +87,7 @@ class _StubAgent:
         self.auto_answers: list[str] = []
 
     @contextlib.contextmanager
-    def cancellable_execution(self):
+    def run_scope(self):
         self.run_depth += 1
         self.running = True
         try:
@@ -101,8 +101,8 @@ class _StubAgent:
                                            agent=self.agent_info, payload=event))
 
     def get_choice(self, prompt, choices, message=None, title=None, subtitle=None,
-                   default=None, allow_extra=False, _skip_auto_confirm=False):
-        if self.auto_confirm and not _skip_auto_confirm:
+                   default=None, allow_extra=False, skip_auto_confirm=False):
+        if self.auto_confirm and not skip_auto_confirm:
             pick = default or (list(choices)[0] if choices else "")
             self.auto_answers.append(prompt)
             return SimpleNamespace(choice=pick, source="auto")
@@ -495,8 +495,8 @@ def test_speech_is_taken_from_the_input_box_end_to_end():
 def test_judge_cards_are_not_auto_confirmed():
     """会话开着自动确认时，法官的卡片也不能被自动答掉 —— 真人的决策必须玩家亲手点。
 
-    xun 的 auto-confirm 判断在显示层里，`Agent.get_choice` 只认 `_skip_auto_confirm`，
-    所以这条是靠那个下划线参数保住的，别"顺手清理"成普通入参。
+    xun 的 auto-confirm 判断在显示层里，`Agent.get_choice` 只认 `skip_auto_confirm`，
+    所以这条是靠它（不是下划线私有参数）保住的，别顺手删掉。
     """
     agent = _make_agent(auto_confirm=True)
     host = HostPresenter(agent)

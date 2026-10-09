@@ -26,6 +26,8 @@ from typing import Any, Sequence
 from xun import Command, extension_attr
 
 COMMAND_NAME = "werewolf"
+API_MIN_VERSION = "1.4.0"
+"""本插件要求的 xun 版本：入口的 `@extension_attr` 与装错提示共用这一个数。"""
 AUTO_COMMAND = "auto-say"
 START_DESCRIPTION = "开一局狼人杀（1 真人 + N AI）；开局设置用卡片问你（每步都有默认值），" \
                     "/werewolf stop 终止，/werewolf status 看局面"
@@ -67,7 +69,7 @@ def default_hint(default: str) -> str:
 _games: dict[str, "_Record"] = {}
 _lock = threading.Lock()
 
-@extension_attr(min_api_version="1.3.0", max_api_version="1.3.0")
+@extension_attr(api_min_version=API_MIN_VERSION)
 def setup_extension(ctx) -> None:
     """加载时唯一做的事：注册 `/werewolf` 这一条命令。
 
@@ -139,8 +141,9 @@ def _broken_install_hint(exc: BaseException) -> str:
         "装好后这里应当看得到 `extensions/werewolf/engine/engine.py`。\n\n"
         f"入口现在在：`{Path(__file__)}`\n"
         f"底层报错：`{type(exc).__name__}: {exc}`\n\n"
-        "也可能是 **xun 太旧**：本插件按 xun 最新源码构建（1.3 起会话消息是类型化的消息类）—— "
-        "先确认手头的 xun 已经更新到最新，再照下面的修法装。\n\n"
+        "也可能是 **xun 太旧**：本插件按 xun 最新源码构建，入口声明的是 "
+        f"`api_min_version={API_MIN_VERSION}`（1.4 起执行态是 `run_scope`、卡片是 "
+        "`skip_auto_confirm`）—— 先确认手头的 xun 已更新，再照下面的修法装。\n\n"
         "修法是**把整个 `werewolf/` 目录**放到 extension 位置（目录名叫 `werewolf`，别只拷入口）：\n"
         "  `cp -r <本仓库>/werewolf <XUN_HOME>/extensions/werewolf`\n"
         "  或 `unzip werewolf-<时间戳>.zip -d <XUN_HOME>/extensions/`"
@@ -662,11 +665,11 @@ def takeover_command_surface(agent: Any) -> None:
     """`/werewolf` 一到手就把这条会话的命令面换成法官那两条：注册 `/auto-say`、
     摘掉其余一切命令、收起工具箱。这条会话已被法官接管，agent 自用的那些一律用不上。
 
-    工具：`ToolBox.disable("*")`（`toolbox.py:135`），`list_tools` 随即不再把它们交给模型，
+    工具：`ToolBox.disable("*")`，`list_tools` 随即不再把它们交给模型，
       下一次请求自然生效。xun 没有"注销工具"的 API，也不需要还原 —— 接管是终身的（一局一命），
       要拿回自己的 agent 请新建会话。
-    命令：`CommandRegistry` 只有公开的 `commands` 字典（`command.py:101`），没有注销/隐藏 API，
-      所以把不属于本插件的直接摘掉。`/help` 由 registry 现造（`command.py:121-131`），摘掉的那些
+    命令：`CommandRegistry` 只有公开的 `commands` 字典，没有注销/隐藏 API，
+      所以把不属于本插件的直接摘掉。`/help` 由 registry 现造（`CommandRegistry.get`），摘掉的那些
       它也不再列出来；`/api/commands/<agent_id>` 读的就是这个活的字典，摘完立刻少几条（实测过）。
       但**前端不会被通知「命令表变了」**：xun 没有这类播报事件，网页只在切 agent/会话时拉一次，
       外加输入框里是一个光秃秃的 `/命令` 时才防抖重拉。所以补全菜单可能还挂着几条已经死掉的命令，

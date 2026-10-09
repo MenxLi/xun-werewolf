@@ -56,8 +56,6 @@ def _modes() -> list[str]:
     out = []
     for mode in ("text", "html"):
         os.environ["WEREWOLF_UI"] = mode
-        if mode == "html" and not H.html_supported():
-            continue
         out.append(mode)
     os.environ.pop("WEREWOLF_UI", None)
     return out

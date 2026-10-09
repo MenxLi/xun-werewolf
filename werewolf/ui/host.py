@@ -290,7 +290,7 @@ class HostPresenter:
     def _sync_running(self) -> None:
         """把「有 AI 座位在算、且没在等真人」这段等待包进 agent 的执行态。
 
-        xun 在 `cancellable_execution` 最外层进出时发 `AgentRunningStartEvent` /
+        xun 在 `run_scope`（`running_state.py`）最外层进出时发 `AgentRunningStartEvent` /
         `AgentRunningEndEvent`，前端据此点亮「运行中」（侧栏徽章、活动条转圈、底部光谱线）。
         不包的话，游戏线程再怎么发事件，前端都认定这个 agent 闲着 —— 等 AI 输出的那几秒
         界面看着就像卡死（`ModelWorkingEvent` 救不了：活动条的 working 只认 runningAgents）。
@@ -305,7 +305,7 @@ class HostPresenter:
                 return
             if want:
                 stack = contextlib.ExitStack()
-                stack.enter_context(self.agent.cancellable_execution())
+                stack.enter_context(self.agent.run_scope())
                 self._run_stack = stack
             else:
                 stack, self._run_stack = self._run_stack, None
@@ -545,9 +545,9 @@ class HostPresenter:
     def _poke_until_cards_close(self) -> None:
         """把 `cancel_event` 反复置位，直到挂着的卡片都收了。
 
-        `get_choice` 的取消只能看 `agent.cancel_event`（xun web_display.py:219），而
-        `/werewolf stop` 本身跑在这个 agent 的命令 scope 里 —— scope 退出时 xun 会 clear 掉
-        这个 event（running_state.py 的 finally），一次 poke 会被抹掉。所以补刀到卡片收完。
+        `get_choice` 的取消只能看 `agent.cancel_event`（xun 的 `WebDisplay.get_choice` 拿它的
+        `is_set` 当 cancel_check），而 `/werewolf stop` 跑在这个 agent 的命令 scope 里 ——
+        scope 退出时 xun 会 clear 掉这个 event（`run_scope` 的 finally），一次 poke 会被抹掉。
         """
         deadline = time.monotonic() + POKE_DEADLINE_SEC
         while self._cards and time.monotonic() < deadline:
@@ -606,8 +606,8 @@ class HostPresenter:
                 default=default,
                 allow_extra=allow_extra,      # 只有「带句话」这种短输入开；选项卡一律不开
                 # 法官的卡片必须真人点：auto_confirm 是给模型工作流的便利，开着它会让这局
-                # 在自己点卡片的情况下悄悄跑完（xun display_abstract.py:317）
-                _skip_auto_confirm=True,
+                # 在自己点卡片的情况下悄悄跑完（判断在 xun 的 `AgentDisplayMixin.get_choice` 里）
+                skip_auto_confirm=True,
             )
         except CancelledError as exc:
             raise GameAborted("用户取消了这局") from exc

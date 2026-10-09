@@ -9,7 +9,7 @@
 1. **一个 Card = 一次播报 = 一个块**。前端每个事件都是一块带时间戳的卡片，按事件粒度发就
    会刷成屏 —— 所以 Part 只是卡的内部结构，不单独成事件。
 2. **HTML 与纯文本从同一份 Part 生成**。`Part.html()` 给浏览器，`Part.text()` 给
-   老版本 xun（没有 `HTMLInfoEvent`）、CLI 和单测断言。两者不会漂移，
+   `WEREWOLF_UI=text`（纯文本形态：单测断言就钉在它上面）。两者不会漂移，
    也不会出现「网页好看但降级散架」。
 3. **只用降级后仍成行的标签**（`div`/`span`/`table`/`tr`/`td`/`br`）。xun 的
    `to_text()` 把这些闭合标签换成换行，所以文本形态天然是表格状的行；不能靠 CSS 排版。
@@ -23,28 +23,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-# ------------------------------------------------------------------ 模式探测
-_HTML_INFO = None          # None = 未探测, False = 不支持
-
-
-def html_supported() -> bool:
-    """当前装的 xun 是否有 `HTMLInfoEvent`（较老的版本没有）；探测而不是比版本号。"""
-    global _HTML_INFO
-    if _HTML_INFO is None:
-        try:
-            from xun.display_abstract import HTMLInfoEvent          # noqa: F401
-            _HTML_INFO = True
-        except Exception:
-            _HTML_INFO = False
-    return _HTML_INFO
-
 
 def mode() -> str:
-    """`"html"` 或 `"text"`。`WEREWOLF_UI=text|html` 可强制（默认自动探测）。"""
+    """形态：`html`（默认）或 `text` —— `WEREWOLF_UI=text` 强制走纯文本。
+
+    不必探测 xun 有没有 `HTMLInfoEvent`：入口的 `api_min_version` 已经把它钉在 1.4，
+    老版本根本加载不起来。CLI 那边 xun 自己会调 `HTMLInfoEvent.to_text()` 降级。
+    """
     forced = (os.environ.get("WEREWOLF_UI") or "").strip().lower()
-    if forced in ("html", "text"):
-        return forced
-    return "html" if html_supported() else "text"
+    return forced if forced in ("html", "text") else "html"
 
 
 # ------------------------------------------------------------------ 调色板
@@ -332,7 +319,7 @@ class Card:
         return "".join(f'<div style="margin:2px 0;">{p.html()}</div>' for p in self.parts)
 
     def event(self):
-        """发事件的 payload：新版 xun 用 HTMLInfoEvent，否则退回 InfoEvent。"""
+        """发事件的 payload：纯文本形态直接发 `InfoEvent`，否则发 HTML 卡。"""
         if mode() == "html":
             from xun.display_abstract import HTMLInfoEvent
             return HTMLInfoEvent(html=self.html(), title=(self.title or self.soft_title) or None)

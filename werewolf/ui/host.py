@@ -397,12 +397,9 @@ class HostPresenter:
             agent_info = AgentInfo(name=author, identifier=identifier or f"ww-{author}",
                                    workdir=self.self_info.workdir)
             call_id = f"{author}-{self._chunks}-{uuid.uuid4().hex[:6]}"
-        # 故意绕开 `agent.display_event`：事件作者不是法官，而是那个座位/教练
-        # （display_event 会把作者钉成 agent 自己，也不要求作者 agent 已 bind 到这个 display）。
-        # 但绕开就得自己补上它做的**另一件事** —— `_record_event`：xun 的
-        # `GET /api/events` 吐的就是那份环形缓冲，前端刷新/重连靠它重建现场。以前只发不记，
-        # 于是玩家发言与复盘报告在刷新之后凭空消失（法官自己的播报因为是 display_event 发的，
-        # 反倒还在 —— 半张现场最骗人）。
+        # 绕开 `agent.display_event` 是为了换作者（它把作者钉成 agent 自己），但绕开就得
+        # 自己补上它做的另一件事 —— 记环形缓冲：`GET /api/events` 吐的就是那份，前端刷新/
+        # 重连靠它重建现场。只发不记的话，法官的播报还在、玩家发言全没了，现场少一半还看不出来。
         event = DisplayEvent(
             name="ModelMessageEvent",
             agent=agent_info,

@@ -5,12 +5,14 @@
     python pack.py --out DIR      # 换输出目录
     python pack.py --check X.zip  # 校验必需文件，并照 xun 的方式真加载一次入口
 
-包里的顶层目录就叫 `werewolf/`（入口 `setup_extension.py` 在它根部），所以**解压到
-`{XUN_HOME}/extensions/` 底下就完事**（`XUN_HOME` 未设时是 `./.xun`）。包里只有运行时
-（引擎、演员、显示层、SVG 资产）—— 仓库根的 README.md、AGENTS.md、pack.py、tests/ 都不进包：
+包里只有 `werewolf/` 这一个文件夹 —— 它就是 extension 目录本身（入口 `setup_extension.py`
+在它的根部），放进 `{XUN_HOME}/extensions/` 即可（`XUN_HOME` 未设时是 `./.xun`）：
 
     unzip dist/werewolf-<时间戳>.zip -d "${XUN_HOME:-$PWD/.xun}/extensions/"
     # → ./.xun/extensions/werewolf/setup_extension.py（xun 的 home 在启动目录下，不在 ~）
+
+里面只有运行时（引擎、演员、显示层、SVG 资产）；仓库根的 README.md、AGENTS.md、pack.py、
+tests/ 都不进包 —— `check()` 会钉住「顶层只有 `werewolf/`」这条。
 
 然后在 xun 会话里发 `/werewolf`。不需要 pip、不需要 PYTHONPATH。
 """
@@ -82,13 +84,17 @@ NOT_IN_PACKAGE = (f"{PKG}/tests/",)
 
 
 def check(zip_path: Path) -> list[str]:
-    """这个包不合格的问题清单：必需文件缺了，或者开发期的东西混进来了。"""
+    """这个包不合格的问题清单：必需文件缺了，或者包外的东西混进来了。
+
+    包里只许有 `werewolf/` 这一个顶层目录：仓库根的 README、AGENTS、pack.py、tests/ 都不该在，
+    将来谁往 `build()` 里加别的来源，这里当场列出来。
+    """
     if not zip_path.is_file():
         raise SystemExit(f"文件不存在：{zip_path}")
     names = set(zipfile.ZipFile(zip_path).namelist())
     problems = [f"缺必需文件：{name}" for name in REQUIRED if name not in names]
-    problems += [f"开发期的东西进了包：{name}" for name in sorted(names)
-                 if name.startswith(NOT_IN_PACKAGE)]
+    problems += [f"包外的东西进了包：{name}" for name in sorted(names)
+                 if not name.startswith(f"{PKG}/") or name.startswith(NOT_IN_PACKAGE)]
     return problems
 
 

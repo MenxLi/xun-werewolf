@@ -866,3 +866,22 @@ def test_custom_board_defaults_open_a_legal_game():
                 assert config.counts.get("wolf") == 3 and dealt_gods == 3, config.counts
         finally:
             session.cleanup()
+
+
+# --------------------------------------------------------------------------- 打包
+def test_the_zip_holds_only_the_runtime_folder():
+    """`pack.py` 打的包里只许有 `werewolf/` 这一个顶层目录。
+
+    用户装的就是这个文件夹：包里多混进 README / pack.py / tests/ 之类的东西，解到
+    `extensions/` 下就会长出莫名其妙的第二层，xun 还可能把它当另一个 extension。
+    """
+    import tempfile
+    import zipfile
+
+    from pack import build, check
+
+    with tempfile.TemporaryDirectory() as td:
+        zip_path = build(Path(td))
+        tops = {name.split("/")[0] for name in zipfile.ZipFile(zip_path).namelist()}
+        assert tops == {"werewolf"}, f"包里冒出了别的顶层目录：{sorted(tops)}"
+        assert check(zip_path) == [], check(zip_path)

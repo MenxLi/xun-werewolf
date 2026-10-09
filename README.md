@@ -4,9 +4,8 @@
 
 在会话里发 `/werewolf`，开一局 **1 个真人（你）+ 其余座位 AI** 的狼人杀：法官用卡片问你要什么板子、坐几号、演谁、规则怎么微调，然后自动天黑；你出局后还能继续问法官、要复盘。
 
-安装方法：
-把 `werewolf` 文件夹整个放到 `$XUN_HOME/extensions/` 下（默认 `./.xun/extensions/`），目录名保持 `werewolf`。
-就是 zip 解压出来的那一层，或者本仓库里的 `werewolf/` —— 它的根部是 xun 要的入口 `setup_extension.py`。
+安装方法：把 `werewolf` 这个文件夹整个放进 `$XUN_HOME/extensions/` 下（默认 `./.xun/extensions/`），
+目录名保持 `werewolf`，然后在 xun 会话里发 `/werewolf`。
 
 **本插件完全由 xun 驱动的 Agent 开发...不保证代码质量与稳定性。**
 
@@ -17,7 +16,7 @@
 | 需要的事 | 用的是 xun 的什么 |
 |---|---|
 | 让 `/werewolf` 出现在会话里 | extension 发现机制 + `agent.command.register(Command(...))` |
-| 卡片问用户选项 | `agent.get_choice(...)` → `ChoiceRequest`（`default` 前端会预选中；法官卡片带 `_skip_auto_confirm=True`，开着自动确认也不替玩家点） |
+| 卡片问用户选项 | `agent.get_choice(...)` → `ChoiceRequest`（`default` 前端会预选中；法官卡片带 `skip_auto_confirm=True`，开着自动确认也不替玩家点） |
 | 玩家在输入框里发言、问法官 | `before_execution` 钩子填 `ExecutionLoopParams.takeover_result` —— 这次执行由法官回答，**根本不进 xun 的 execution loop**（局打完了也一样：那时是法官自己显式去问复盘教练） |
 | 法官播报、局面看板、票型、身份牌与终局横幅（内联 SVG） | `InfoEvent` / `HTMLInfoEvent` |
 | 每个 AI 座位的记忆、结构化输出、重试 | 每个座位就是一个 xun `Agent`（复盘教练也是） |
@@ -35,11 +34,12 @@ package 形态的文件名固定是 `extensions/<名字>/setup_extension.py`，*
 ```bash
 XUN_HOME_DIR="${XUN_HOME:-$PWD/.xun}"                 # 在你打算启动 xun 的那个目录里执行
 mkdir -p "$XUN_HOME_DIR/extensions"
-ln -s "$(pwd)/werewolf" "$XUN_HOME_DIR/extensions/werewolf"   # 仓库里这一层就是 extension 目录；改完代码重启 xun 生效
+ln -s "$(pwd)/werewolf" "$XUN_HOME_DIR/extensions/werewolf"   # 仓库里的 werewolf/ 就是 extension 目录本身；改完代码重启 xun 生效
 ```
 
-或打包后解到 `$XUN_HOME/extensions/`：`unzip dist/werewolf-<时间戳>.zip -d "$XUN_HOME_DIR/extensions/"`。
-zip 顶层就是 `werewolf/`，里面只有运行时（引擎、卡片、SVG 资产）—— README、AGENTS、pack.py、`tests/` 留在仓库根，不进包。
+用 `python pack.py` 打出的 zip 也一样 —— 里面就是同一个 `werewolf/` 文件夹，解到同一个目录即可：
+`unzip dist/werewolf-<时间戳>.zip -d "$XUN_HOME_DIR/extensions/"`。包里只有运行时（引擎、卡片、
+SVG 资产），README、AGENTS、pack.py、`tests/` 都不进去（`pack.py --check` 会钉住这条）。
 前提：xun 里配好了模型与 key（AI 座位真的会调模型）、**Python 3.12+**（照 xun 的 `requires-python`）、**xun 1.4+**（插件按最新源码的 xun 构建，不留旧版分支：执行态叫 `run_scope`、卡片跳过自动确认的参数是 `skip_auto_confirm`）。
 
 ## 玩
@@ -57,7 +57,8 @@ zip 顶层就是 `werewolf/`，里面只有运行时（引擎、卡片、SVG 资
   不用自己在脑子里数座位。
 - 命令**不带参数**：开局设置一律走卡片，每步第一个选项就是默认值，**一路点下去最快**。
 - **一局开始后，这个会话的 agent 就是法官**：**局内**它不再调用模型，也不给自己新建 agent
-  或换工作目录（每个 AI 座位有自己那份 agent 与工作目录，那是座位的事，不是法官的）。
+  或换工作目录（每个 AI 座位有自己那份 agent，工作目录挂在法官 agent 的临时目录下，
+  那是座位的事，不是法官的）。
   选择题点法官卡片，**发言和遗言直接发在这条会话的输入框里** —— 不用切会话、不用切 agent。
 - 局内你发进这条会话的话不会传给任何玩家；问法官也是同一个输入框，它只看公开局面，问身份一律不给。
 - **局打完了，这条会话就是复盘室**：直接打字问 —— 法官把话转给**复盘教练**，它手里是这局的

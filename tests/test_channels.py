@@ -28,32 +28,27 @@ from xun.display_abstract import AgentInfo, DisplayAbstract, DisplayEvent
 from xun.conversation import Conversation
 
 
-def _make_display():
-    from xun.display_abstract import DisplayAbstract
+class _Rec(DisplayAbstract):
+    """广播口桩：`on_event` 收到的记进 `emitted`。
 
-    class _Rec(DisplayAbstract):
-        """广播口桩：`on_event` 收到的记进 `emitted`。
+    历史那份**不留在这儿** —— `DisplayAbstract` 本来就带 xun 的环形缓冲（`events()` /
+    `_record_event`），1.4 起默认容量是 0，真消费者要自己 `with_buffer_size`。桩跟着真东西
+    一起开，才测得到「事件有没有同时进缓冲」（前端刷新读的就是它）。
+    """
 
-        历史那份**不留在这儿** —— `DisplayAbstract` 本来就带 xun 的环形缓冲（`events()` /
-        `_record_event`），1.4 起默认容量是 0，真消费者要自己 `with_buffer_size`。
-        桩跟着真东西一起开，才测得到「事件有没有同时进缓冲」（前端刷新读的就是它）。
-        """
+    def __init__(self) -> None:
+        super().__init__()
+        self.emitted: list[DisplayEvent] = []
+        self.requests: list = []
+        self.with_buffer_size(500)
 
-        def __init__(self) -> None:
-            super().__init__()
-            self.emitted: list[DisplayEvent] = []
-            self.requests: list = []
-            self.with_buffer_size(500)
+    def on_event(self, event) -> None:
+        self.emitted.append(event)
 
-        def on_event(self, event) -> None:
-            self.emitted.append(event)
-
-        def get_choice(self, request):
-            self.requests.append(request)
-            choices = list(request.choices or [])
-            return (request.default or (choices[0] if choices else "")) or ""
-
-    return _Rec()
+    def get_choice(self, request):
+        self.requests.append(request)
+        choices = list(request.choices or [])
+        return (request.default or (choices[0] if choices else "")) or ""
 
 
 class _StubHooks:
@@ -80,7 +75,7 @@ class _StubAgent:
     """
 
     def __init__(self, display=None, *, auto_confirm: bool = False) -> None:
-        self.display = display if display is not None else _make_display()
+        self.display = display if display is not None else _Rec()
         self.name = "会话"
         self.identifier = "agent-main"
         self.agent_info = AgentInfo(name=self.name, identifier=self.identifier,

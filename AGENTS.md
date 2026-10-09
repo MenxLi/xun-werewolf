@@ -17,7 +17,8 @@ python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 
 
 - **仓库根的 `werewolf/` 就是 extension 目录**：入口 `setup_extension.py` 在它根部，`engine/ actors/ ui/`
   与 `assets/` 在旁边。装 = 整目录拷进 `extensions/`（xun 按目录名认 extension），`pack.py` 打的也只有
-  这一层 —— 这一层里不放开发期的东西，README、AGENTS、pack.py、`tests/` 都在仓库根、都不进包。
+  这个目录，开发期的东西一概不进（README、AGENTS、pack.py、`tests/` 都在仓库根）——
+  `pack.check()` 会核对「zip 顶层只有 `werewolf/`」。
   测试反过来绝对导入引擎（`from werewolf.engine import …`），在仓库根跑，拿到的就是入口那份引擎。
 - **代码越少越好**：不留兼容分支，不留“以后可能用得上”的参数与抽象。
 - **引擎不碰 xun**：规则、状态、可见性都在引擎层，脚本玩家要能直接驱动它跑完一局；只有演员层与显示层可以碰 xun。
@@ -45,6 +46,10 @@ python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 
 ## 这条会话就是法官
 
 - 法官**不是另一个 agent**，它就是这条会话的 agent：构造时挂一个 execution 前的钩子，把那次执行的结果填成规则式回答 —— “法官**局内**不用模型”从此是结构，不是纪律。
+- **临时物都在法官 agent 的临时目录里**：`GameSession.root_dir` = `{agent.workspace.tempdir}/werewolf/`
+  （座位 agent 的会话文件与 `review/`）。自己 `mkdtemp()` 那版本在「`cleanup()` 没跑到」时会在
+  /tmp 留下永久垃圾，挂到 agent 的 tempdir 下就由 xun 的 `DeferredTempDirectory` 兜住了。
+  `cleanup()` 只收自己那一坨，**不许**删 agent 整个临时目录。
 - **唯一的口子在局后**：`host.close_game()` 之后，输入框里的话转给 `host.coach`（复盘教练，读的是上帝视角全文），法官只做转发 + 以 `REVIEWER` 作者播报。口子只在局已终（打完或被打断）时开，有测试钉着「局内教练一次都不被碰」；讨论的答案只作为教练的话播出，**不写进局面事件、不进任何演员的记录**。教练由 `GameSession._coach()` 懒建、一局一个、**局末不 finalize**（讨论靠它的会话记忆，重建等于失忆），`cleanup()` 才连 `review/` 工作目录一起收。它关掉 `auto_compact`，并且 `_trim` 钉住 system + 对局记录两条不剪 —— 摘要一遍等于把棋盘擦掉让教练凭印象下棋。教练挂了要退回 `answers.answer`，不许把用户的话吞了；连着问几句要排队，不并发（教练一个会话一次只问一句，同 `Engine._spawn` 那条纪律）；**生成复盘也走这条队列**（`host.coach_task`），就地调就等于允许「复盘那几十秒里有人打字」时两个线程一起写教练的会话。
 - **接管是终身的**：不加开关、不加“交还”、不加退出命令。把 agent 还给用户的唯一出口是前端“新建会话”。
 - **一个 agent 只挂一份钩子**：一次性的钩子会让第二条消息漏给模型；挂两份更糟 —— 后写的空结果覆盖前一份回复，用户发话全场没人应答。所以一局一命、记录永不删除（局后还要靠它读局面复盘），第二次开新局一律拒绝。

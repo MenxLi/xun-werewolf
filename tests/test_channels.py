@@ -31,12 +31,21 @@ def _make_display():
     from xun.display_abstract import DisplayAbstract
 
     class _Rec(DisplayAbstract):
+        """广播口桩：`on_event` 收到的记进 `emitted`。
+
+        历史那份**不留在这儿** —— `DisplayAbstract` 本来就带 xun 的环形缓冲（`events()` /
+        `_record_event`），1.4 起默认容量是 0，真消费者要自己 `with_buffer_size`。
+        桩跟着真东西一起开，才测得到「事件有没有同时进缓冲」（前端刷新读的就是它）。
+        """
+
         def __init__(self) -> None:
-            self.events: list[DisplayEvent] = []
+            super().__init__()
+            self.emitted: list[DisplayEvent] = []
             self.requests: list = []
+            self.with_buffer_size(500)
 
         def on_event(self, event) -> None:
-            self.events.append(event)
+            self.emitted.append(event)
 
         def get_choice(self, request):
             self.requests.append(request)
@@ -97,8 +106,10 @@ class _StubAgent:
             self.running = self.run_depth > 0
 
     def display_event(self, event) -> None:
-        self.display.on_event(DisplayEvent(name=type(event).__name__,
-                                           agent=self.agent_info, payload=event))
+        # 照 xun 的 `AgentDisplayMixin.display_event`：先记进环形缓冲，再交给 display
+        wrapped = DisplayEvent(name=type(event).__name__, agent=self.agent_info, payload=event)
+        self.display._record_event(wrapped)
+        self.display.on_event(wrapped)
 
     def get_choice(self, prompt, choices, message=None, title=None, subtitle=None,
                    default=None, allow_extra=False, skip_auto_confirm=False):
@@ -151,12 +162,12 @@ class _SpyCoach:
 
 
 def _bubbles(host: HostPresenter, author: str = REVIEWER) -> list[str]:
-    return [e.payload.content for e in host.display.events
+    return [e.payload.content for e in host.display.emitted
             if e.name == "ModelMessageEvent" and e.agent.name == author]
 
 
 def _infos(host: HostPresenter) -> str:
-    return " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
+    return " ".join(e.payload.message for e in host.display.emitted if e.name == "InfoEvent")
 
 
 def test_the_coach_is_untouched_while_the_game_is_alive():
@@ -387,13 +398,13 @@ def test_judge_never_emits_chat_bubbles():
         host.phase(state, "第 1 天 · 发言")
         host.on_events(state, [_speech(state, 3, "查杀 5 号"),
                                Event(kind=K_WIN, audience="public", text="好人胜利", payload={}, day=1)])
-        bubbles = [e for e in host.display.events if e.name == "ModelMessageEvent"]
+        bubbles = [e for e in host.display.emitted if e.name == "ModelMessageEvent"]
         assert all(e.agent.name != "法官" for e in bubbles), "法官不该发聊天气泡"
-        infos = harness.info_blocks(host.display.events)
+        infos = harness.info_blocks(host.display.emitted)
         assert any("最终配置" in m for m in infos), infos
         assert any("第 1 天 · 发言" in m for m in infos)
         assert any("复盘生成失败" in m for m in
-                   [e.payload.message for e in host.display.events if e.name == "WarningEvent"])
+                   [e.payload.message for e in host.display.emitted if e.name == "WarningEvent"])
     finally:
         host.cleanup()
 
@@ -409,12 +420,12 @@ def test_player_speech_bubbles_are_authored_by_the_seat():
             _speech(state, 2, "过了", K_LAST_WORDS),
         ])
         messages = [(e.agent.name, e.payload.content)
-                    for e in host.display.events if e.name == "ModelMessageEvent"]
+                    for e in host.display.emitted if e.name == "ModelMessageEvent"]
         assert messages == [("3号", "我是预言家，验了 5 号"),
                             ("5号（警上）", "他假的"),
                             ("2号（遗言）", "过了")], messages
         assert all(e.payload.total_tokens == 0
-                   for e in host.display.events if e.name == "ModelMessageEvent")
+                   for e in host.display.emitted if e.name == "ModelMessageEvent")
     finally:
         host.cleanup()
 
@@ -423,7 +434,7 @@ def test_review_report_is_a_markdown_message_by_the_coach():
     host = HostPresenter(_make_agent())
     try:
         host.say_as(REVIEWER, "## 战局走向\n\n- 第 1 天出了 2 号")
-        last = [e for e in host.display.events if e.name == "ModelMessageEvent"][-1]
+        last = [e for e in host.display.emitted if e.name == "ModelMessageEvent"][-1]
         assert last.agent.name == REVIEWER
         assert last.payload.content.startswith("## ")
     finally:
@@ -478,7 +489,7 @@ def test_speech_is_taken_from_the_input_box_end_to_end():
                 break
             time.sleep(0.01)
         assert host._awaiting == 1, "wait_text 没有进入等待"
-        blocks = harness.info_blocks(host.display.events)
+        blocks = harness.info_blocks(host.display.emitted)
         assert any("输入框" in b for b in blocks), blocks
         assert any("你排第 2/5" in b for b in blocks), blocks
 
@@ -530,7 +541,7 @@ def test_user_message_to_judge_is_answered_without_the_model():
     """
     host = _judge()
     host.agent.instruct("现在还有谁活着？").execute()
-    infos = [e.payload.message for e in host.display.events if e.name == "InfoEvent"]
+    infos = [e.payload.message for e in host.display.emitted if e.name == "InfoEvent"]
     assert any("存活" in m for m in infos), infos
     host.cleanup()
 
@@ -540,23 +551,23 @@ def test_judge_refuses_identities_while_the_game_is_alive():
     state = host.state
     try:
         host.agent.instruct("谁是狼").execute()
-        reply = " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
+        reply = " ".join(e.payload.message for e in host.display.emitted if e.name == "InfoEvent")
         assert "不能" in reply or "公开信息" in reply, reply
         for player in state.players.values():
             assert player.role_name not in reply
 
         host.agent.instruct("现在规则是什么").execute()
-        reply = " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
+        reply = " ".join(e.payload.message for e in host.display.emitted if e.name == "InfoEvent")
         assert "板子" in reply or "胜负" in reply, reply
 
         host.agent.instruct("随便说点什么奇怪的").execute()
-        reply = " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
+        reply = " ".join(e.payload.message for e in host.display.emitted if e.name == "InfoEvent")
         from werewolf.ui.answers import USAGES
         assert USAGES in reply, "兜底该把「我只能答这几类」说清楚"
 
         # 用法说明不能教人把发言写进卡片：那会绕过 wait_text，引擎永远等不到这句话
         host.agent.instruct("怎么用").execute()
-        reply = " ".join(e.payload.message for e in host.display.events if e.name == "InfoEvent")
+        reply = " ".join(e.payload.message for e in host.display.emitted if e.name == "InfoEvent")
         assert "输入框" in reply, reply
         assert "或输入其他答复" not in reply, reply
     finally:
@@ -579,14 +590,14 @@ def test_whole_fake_game_over_the_real_channels():
         engine.actors = {seat: FakeActor(seat, rng) for seat in state.players}
         engine.run()
         bubbles = [(e.agent.name, e.payload.content)
-                   for e in host.display.events if e.name == "ModelMessageEvent"]
+                   for e in host.display.emitted if e.name == "ModelMessageEvent"]
         assert bubbles, "发言应该以气泡形式出现"
         assert all(name[0].isdigit() or name.startswith("复盘") or "号" in name for name, _ in bubbles), bubbles
         assert not any(name == "法官" for name, _ in bubbles)
         # 活动窗口要成对开合：漏关会让圆点对着一局已经结束的牌局一直装忙。
         # 这里同时盯住另一头 —— 整局一次都没亮过，说明汇聚点上的打招呼又丢了。
         assert not host._waiting, f"跑完一局仍有没关的活动窗口：{list(host._waiting)}"
-        assert any(e.name == "ModelWorkingEvent" for e in host.display.events), "整局都没亮活动指示"
+        assert any(e.name == "ModelWorkingEvent" for e in host.display.emitted), "整局都没亮活动指示"
     finally:
         host.cleanup()
 
@@ -601,7 +612,7 @@ def test_status_block_refreshes_when_the_day_changes():
         host.phase(state, "第 1 天 · 投票", "投票放逐一名玩家")
         host.phase(state, "第 2 天 · 夜幕", "神职行动")
         host.cleanup()        # 播报是攒到阶段收尾才落地，这里强制结算
-        msgs = harness.info_blocks(host.display.events)
+        msgs = harness.info_blocks(host.display.emitted)
         assert sum("存活" in m for m in msgs) == 2, msgs
         # 同一阶段内不重复局面摘要；阶段头也只出现一次（文本形态是 ━━ 行，卡片形态是标题栏）
         assert sum("第 1 天 · 发言" in m for m in msgs) == 1, msgs
@@ -631,7 +642,7 @@ def test_system_lines_are_batched_into_one_block():
             Event(kind=K_EXILE, audience="public", text="5号 以最高票被放逐出局", payload={"seat": 5}, day=1),
         ])
         host.cleanup()
-        msgs = harness.info_blocks(host.display.events)
+        msgs = harness.info_blocks(host.display.emitted)
         assert len(msgs) == 2, msgs
         assert "昨夜倒牌" in msgs[0] and "票型" in msgs[0], msgs[0]
         assert "放逐" in msgs[1], msgs[1]
@@ -647,10 +658,10 @@ def test_thinking_uses_the_same_author_label_as_the_speech_bubble():
         host.state = state
         host.thinking(state, 3, K_SHERIFF_SPEECH)
         host.say_as(render.speech_author(3, K_SHERIFF_SPEECH), "警上讲两句。")
-        bubble = [e for e in host.display.events if e.name == "ModelMessageEvent"][-1]
+        bubble = [e for e in host.display.emitted if e.name == "ModelMessageEvent"][-1]
         assert bubble.agent.name == "3号（警上）", bubble.agent.name
         # 正常速度说完：不该有任何"还在想"的播报
-        assert not [e for e in host.display.events if e.name == "WarningEvent"]
+        assert not [e for e in host.display.emitted if e.name == "WarningEvent"]
     finally:
         host.cleanup()
 
@@ -666,18 +677,18 @@ def test_working_indicator_rides_the_bound_agent():
         state = _state()
         host.state = state
         host.thinking(state, 3, K_SHERIFF_SPEECH)
-        working = [e for e in host.display.events if e.name == "ModelWorkingEvent"]
+        working = [e for e in host.display.emitted if e.name == "ModelWorkingEvent"]
         assert len(working) == 1, working
         assert working[0].agent.identifier == host.self_info.identifier, working[0].agent
         assert not working[0].agent.identifier.startswith("ww-"), working[0].agent.identifier
 
         host.thinking(state, 3, K_SHERIFF_SPEECH)            # 同一座位重复打招呼
-        assert len([e for e in host.display.events
+        assert len([e for e in host.display.emitted
                     if e.name == "ModelWorkingEvent"]) == 1, "不许叠窗口"
 
         author = render.speech_author(3, K_SHERIFF_SPEECH)
         host.say_as(author, "警上讲两句。")
-        bubble = [e for e in host.display.events if e.name == "ModelMessageEvent"][-1]
+        bubble = [e for e in host.display.emitted if e.name == "ModelMessageEvent"][-1]
         assert bubble.payload.model_call_id == working[0].payload.model_call_id, \
             "发言必须接在同一个思考窗口上"
         assert not host._waiting, "话说完了就该收掉窗口"
@@ -723,7 +734,7 @@ def test_two_threads_never_split_a_block():
         host.cleanup()
 
     assert not errors, [repr(e) for e in errors]
-    blocks = harness.info_blocks(host.display.events)
+    blocks = harness.info_blocks(host.display.emitted)
     assert blocks and all(block.strip() for block in blocks), blocks      # 没有半截空块
     assert sum("存活" in block for block in blocks) >= 2, blocks          # 看板真发出去了
 
@@ -741,7 +752,7 @@ def test_human_own_speech_is_not_replayed_as_a_seat_bubble():
             _speech(state, human, "我是好人，我要守护大家！"),
             _speech(state, ai, "我是预言家，昨夜验了 3 号。"),
         ])
-        authors = [e.agent.name for e in host.display.events if e.name == "ModelMessageEvent"]
+        authors = [e.agent.name for e in host.display.emitted if e.name == "ModelMessageEvent"]
         assert f"{ai}号" in authors, authors                       # AI 座位的气泡照旧
         assert not [a for a in authors if a.startswith(f"{human}号")], authors
     finally:
@@ -763,7 +774,7 @@ def test_each_prompt_card_says_how_to_answer_it():
         with host._input:                       # 先放好那句话，wait_text 取到就返回
             host._inbox.append("我怀疑 1 号。")
         host.wait_text(title="第 1 天 · 发言", subtitle="你排第 1/2", note="该你说话了")
-        card = [e for e in host.display.events if e.name == "HTMLInfoEvent"][-1]
+        card = [e for e in host.display.emitted if e.name == "HTMLInfoEvent"][-1]
         text = card.payload.to_text()
         assert "输入框" in text, text
         assert "不用点卡片" not in text, text            # 不许引用根本没弹出来的控件
@@ -807,7 +818,7 @@ def test_working_windows_open_and_close_in_pairs():
     host = HostPresenter(agent)
 
     def lit() -> int:
-        return len([e for e in host.display.events if e.name == "ModelWorkingEvent"])
+        return len([e for e in host.display.emitted if e.name == "ModelWorkingEvent"])
 
     try:
         state = _state()
@@ -916,7 +927,7 @@ def test_the_line_the_judge_spoke_is_heard_by_the_table():
                       payload={"seat": seat, "words": words}, day=state.day)
 
         def bubbles() -> list[str]:
-            return [e.agent.name for e in host.display.events if e.name == "ModelMessageEvent"]
+            return [e.agent.name for e in host.display.emitted if e.name == "ModelMessageEvent"]
 
         host.on_events(state, [event])
         assert bubbles() == [], "他自己打的那句话本来就在流里，不该重播一遍"
@@ -1011,3 +1022,20 @@ def test_cleanup_never_leaves_a_run_scope_behind():
     host.cleanup()
     assert agent.running is False, "局 end 了还挂着执行态 = 永远亮着的「运行中」"
     assert agent.run_depth == 0, "范围没配对退出，前端会一直显示忙"
+
+
+def test_every_broadcast_is_recorded_for_a_reloading_frontend():
+    """刷新过的浏览器只能从环形缓冲重建现场：漏记一条，那句话就永远看不见了。
+
+    xun 的 `Agent.display_event` 是两步 —— `_record_event`（记进环形缓冲）+ `on_event`
+    （广播）。法官发玩家气泡必须换作者，所以绕开了 `display_event`，那就得自己补上第一步：
+    `GET /api/events` 吐的正是这份缓冲。这里故意**不**看 display 自己收到的那份列表
+    （`emitted`），只看缓冲 —— 以前就是「广播收到了、缓冲里没有」，现场少一半还看不出来。
+    """
+    host = HostPresenter(_make_agent())
+    host.say_as("3号（发言）", "昨晚我验的 5 号，他是狼。")
+    host.info("法官自己的一句话")
+
+    recorded = {(event.name, event.agent.name) for event in host.display.events()}
+    assert ("ModelMessageEvent", "3号（发言）") in recorded, recorded
+    assert ("InfoEvent", "会话") in recorded, recorded

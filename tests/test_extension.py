@@ -764,7 +764,7 @@ def test_a_finished_game_reports_stats_and_reaches_the_review():
         cfg.seed, cfg.human_seat = 11, 4
         session.play(cfg)                                  # 不许抛：抛了就等于玩家看到的崩局
 
-        events = session.host.display.events
+        events = session.host.display.emitted
         texts = [(getattr(e.payload, "message", None) or getattr(e.payload, "title", "") or "")
                  for e in events]
         assert not any("对局异常终止" in text for text in texts), texts[-3:]

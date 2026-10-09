@@ -72,7 +72,7 @@ def test_block_count_is_the_same_in_both_modes():
             _script(host)
         finally:
             host.cleanup()
-        counts[mode] = len(harness.info_blocks(host.display.events))
+        counts[mode] = len(harness.info_blocks(host.display.emitted))
     assert counts, "没有可跑的模式"
     assert len(set(counts.values())) == 1, counts
     assert counts[next(iter(counts))] >= 2, counts
@@ -88,7 +88,7 @@ def test_degradation_keeps_every_key_line():
             _script(host)
         finally:
             host.cleanup()
-        per_mode[mode] = "\n".join(harness.info_blocks(host.display.events))
+        per_mode[mode] = "\n".join(harness.info_blocks(host.display.emitted))
     joined = per_mode["text"]
     for needle in ("存活", "第 1 天 · 发言", "第 1 天 · 投票", "🗳", "1号→3号", "被放逐"):
         assert needle in joined, needle
@@ -109,7 +109,7 @@ def test_phase_block_becomes_a_titled_card():
             host.cleanup()
         finally:
             host.cleanup()
-        cards = [e for e in host.display.events if e.name == "HTMLInfoEvent"]
+        cards = [e for e in host.display.emitted if e.name == "HTMLInfoEvent"]
         assert cards, "html 模式下法官块应是 HTMLInfoEvent"
         titles = [c.payload.title for c in cards]
         assert any(t and "第 1 天 · 发言" in t for t in titles), titles
@@ -271,7 +271,7 @@ def test_dynamic_text_is_escaped_not_injected():
             host.cleanup()
         finally:
             host.cleanup()
-        html = "".join(e.payload.html for e in host.display.events if e.name == "HTMLInfoEvent")
+        html = "".join(e.payload.html for e in host.display.emitted if e.name == "HTMLInfoEvent")
         assert "<script>" not in html and "<img " not in html, html
         assert "&lt;script&gt;" in html and "alert(1)" in html         # 内容仍在，只是不再是标签
 
@@ -282,7 +282,7 @@ def test_status_command_publishes_a_public_card():
         state = _state()
         host.state = state
         host.publish_status()
-        cards = [e for e in host.display.events if e.name == "HTMLInfoEvent"]
+        cards = [e for e in host.display.emitted if e.name == "HTMLInfoEvent"]
         assert len(cards) == 1, cards
         text = cards[0].payload.to_text()
         assert "板子：" in text and "存活" in text
@@ -298,7 +298,7 @@ def test_finished_board_reveals_everything():
         state = _state()
         state.winner = "wolf"
         host.finished(state)
-        cards = [e for e in host.display.events if e.name == "HTMLInfoEvent"]
+        cards = [e for e in host.display.emitted if e.name == "HTMLInfoEvent"]
         assert len(cards) == 1, cards
         assert "本局结束" in (cards[0].payload.title or "")
         assert "ban_wolf" in cards[0].payload.html, cards[0].payload.html   # 终局有胜负横幅
@@ -322,7 +322,7 @@ def test_no_victory_banner_without_a_winner():
         state = _state()
         state.winner = "draw"
         host.finished(state)
-        cards = [e for e in host.display.events if e.name == "HTMLInfoEvent"]
+        cards = [e for e in host.display.emitted if e.name == "HTMLInfoEvent"]
         assert len(cards) == 1, cards
         assert "<svg" not in cards[0].payload.html, cards[0].payload.html
         assert "胜利" not in cards[0].payload.to_text(), cards[0].payload.to_text()

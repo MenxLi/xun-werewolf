@@ -397,17 +397,20 @@ class HostPresenter:
             agent_info = AgentInfo(name=author, identifier=identifier or f"ww-{author}",
                                    workdir=self.self_info.workdir)
             call_id = f"{author}-{self._chunks}-{uuid.uuid4().hex[:6]}"
-        # 故意绕开 agent.display_event：事件作者不是法官，而是那个座位/教练。
-        # WebDisplay.on_event 只做「存历史 + 广播」，不要求作者 agent 已 bind。
-        self.display.on_event(DisplayEvent(
+        # 故意绕开 `agent.display_event`：事件作者不是法官，而是那个座位/教练
+        # （display_event 会把作者钉成 agent 自己，也不要求作者 agent 已 bind 到这个 display）。
+        # 但绕开就得自己补上它做的**另一件事** —— `_record_event`：xun 的
+        # `GET /api/events` 吐的就是那份环形缓冲，前端刷新/重连靠它重建现场。以前只发不记，
+        # 于是玩家发言与复盘报告在刷新之后凭空消失（法官自己的播报因为是 display_event 发的，
+        # 反倒还在 —— 半张现场最骗人）。
+        event = DisplayEvent(
             name="ModelMessageEvent",
             agent=agent_info,
-            payload=ModelMessageEvent(
-                model_call_id=call_id,
-                content=text.strip(),
-                total_tokens=0,
-            ),
-        ))
+            payload=ModelMessageEvent(model_call_id=call_id, content=text.strip(),
+                                      total_tokens=0),
+        )
+        self.display._record_event(event)     # noqa: SLF001 —— display_event 也是这么做的
+        self.display.on_event(event)
         self._sync_running()   # 这一个座位落地了，其余可能还在算（`on_events` 也经这儿）
 
     # ---------------------------------------------------------------- 状态与播报

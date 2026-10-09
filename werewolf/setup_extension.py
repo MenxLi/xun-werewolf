@@ -14,7 +14,8 @@ extension 的名字就是这个目录名，所以**本目录（`werewolf/`）就
 1. **加载时只注册命令**：不 import 引擎、不起线程、不改 config、不注册 tool。引擎可能在
    缺依赖的机器上 import 失败，也不能拖慢 xun 启动 —— 这些都推迟到 `/werewolf` 真正执行时
    （见 `_load_engine()`）。**测试锁死了这条**（`test_no_side_effects_on_load`）。
-2. **一个会话一局**：再发一次 `/werewolf` 就收尾上一局、换法官接班。
+2. **一个会话一局**（一局一命）：法官的接管摘不掉，同一条会话上不许出现第二个法官 ——
+   再发一次 `/werewolf` 只会被挡回去（进行中让你用 `/werewolf stop`，打完让你新建会话）。
 """
 from __future__ import annotations
 
@@ -246,14 +247,16 @@ class GameSession:
     TEMPERATURE_BY_LEVEL = {"rookie": 1.0, "balanced": 0.9, "elite": 0.8}
 
     def __init__(self, agent: Any, model_name: str | None = None) -> None:
-        import tempfile
-
         self.E = _load_engine()
         self.agent = agent
         self.model_name = model_name
         # 只放座位 agent 的工作目录与复盘产物。法官不再需要自己的工作目录 ——
         # 它就是 `agent` 本身，不新建 agent、不新建 workspace。
-        self.root_dir = Path(tempfile.mkdtemp(prefix="werewolf-"))
+        # 这一堆临时物放在**法官这个 agent 的临时目录**里（xun 的 `Workspace.tempdir`）：
+        # 以前自己 `tempfile.mkdtemp()`，走到「cleanup 没跑到」那条路（崩在半路、进程被杀）
+        # 就是 /tmp 里永久留一个 werewolf-XXXX；agent 的临时目录本来就有人负责收。
+        self.root_dir = Path(agent.workspace.tempdir.path) / "werewolf"
+        self.root_dir.mkdir(parents=True, exist_ok=True)
         self.host = self.E.HostPresenter(agent)   # 构造即接管：用户发的话不进模型
         self.engine: Any = None
         self.thread: threading.Thread | None = None
@@ -266,6 +269,11 @@ class GameSession:
     def alive(self) -> bool:
         """这一局还在不在跑（只用来决定 `/werewolf` 的拒绝文案怎么说）。"""
         return self.thread is not None and self.thread.is_alive()
+
+    @property
+    def review_open(self) -> bool:
+        """局后的讨论口子开了没 —— 也就是「这局有没有复盘可问」。`_stop` 的回执照它说。"""
+        return self.host.game_over
 
     def start_in_background(self) -> "GameSession":
         self.thread = threading.Thread(target=self.run, name="werewolf-game", daemon=True)
@@ -282,7 +290,9 @@ class GameSession:
             if config is not None:
                 self.play(config)
         except E.GameAborted:
-            host.notice(self.engine.state if self.engine else None, "已收到停止请求，本局终止。")
+            host.notice(self.engine.state if self.engine else None,
+                        "已收到停止请求，本局终止。" if self.engine is not None else
+                        "已收到停止请求：开局设置被终止，这一局还没发到牌桌上。")
         except Exception as exc:                 # 任何异常都不该让会话静默死掉
             self.host.say(f"⚠️ **对局异常终止**：{type(exc).__name__}: {exc}\n\n"
                           f"```\n{traceback.format_exc(limit=6)}\n```")
@@ -362,7 +372,8 @@ class GameSession:
         host.card(self._setup_card(config))
         if not host.confirm("以上配置可以开局吗？", "点“确认”立即天黑。",
                             title="开局设置 · 第 5 步：确认开局"):
-            host.say("好的，本局取消。想再开一局就再发一次 `/werewolf`。")
+            host.say("好的，本局取消。这条会话已被法官接管（一局一命，摘不回去），"
+                    "要重开请新建一个会话。")
             return None
         return replace(config, rules_shown_in_setup=True)   # 规则已展示，引擎不必再播一遍
 
@@ -698,7 +709,13 @@ def _stop(agent: Any) -> None:
     except Exception as exc:                           # pragma: no cover
         agent.info(f"终止时出了点问题：`{type(exc).__name__}: {exc}`")
         return
-    agent.info("这一局已终止。法官还留在这条会话里，想问刚才那局的复盘随时问它。")
+    if record.session.review_open:
+        agent.info("这一局已终止。法官还留在这条会话里，想问刚才那局的复盘随时问它。")
+    else:
+        # 开局设置里就被停：这局根本没发到牌桌上，讨论口子也没开（教练要读 engine.state，
+        # 那时它还不存在）—— 说「可以问复盘」就是空头支票
+        agent.info("这一局还没发到牌桌上（开局设置被终止），没有复盘可问 —— 这条会话仍是法官，"
+                   "要开一局请新建一个会话。")
 
 
 def auto_say(agent: Any, arguments: Sequence[str] | None = None) -> None:

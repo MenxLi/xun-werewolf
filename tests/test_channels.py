@@ -23,6 +23,7 @@ from werewolf.engine.state import GameState
 from werewolf.ui import render
 from . import harness
 from werewolf.ui.host import REVIEWER, HostPresenter
+from xun import Workspace
 from xun.display_abstract import AgentInfo, DisplayAbstract, DisplayEvent
 from xun.conversation import Conversation
 
@@ -84,7 +85,10 @@ class _StubAgent:
         self.identifier = "agent-main"
         self.agent_info = AgentInfo(name=self.name, identifier=self.identifier,
                                     description="", workdir=Path.cwd())
-        self.workspace = SimpleNamespace(workdir=Path.cwd())
+        # 用 xun 真的 Workspace：法官的工作目录建在 `workspace.tempdir` 底下，自编一个
+        # 只有 workdir 的假 workspace 就测不到那条路。每个实例一份，才像真 agent 那样
+        # 各占一块临时目录（共用会把并行夹具里的另一局一起收掉）。
+        self.workspace = Workspace(workdir=Path.cwd())
         self.hooks = SimpleNamespace(before_execution=_StubHooks())
         self.conversation = Conversation()
         self.cancel_event = threading.Event()

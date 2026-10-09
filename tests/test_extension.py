@@ -262,6 +262,7 @@ class _FakeSession:
         self.cleaned = False
         self.started = False
         self.alive = False                # 真 GameSession 上是 thread.is_alive()
+        self.review_open = False          # 真 GameSession 上是 host.game_over（口子开没开）
         self.published: list[str] = []
         published = self.published          # 闭包捕获，避免假 host 的 self 传参问题
         self.host = type("H", (), {"publish_status": staticmethod(lambda: published.append("board"))})()
@@ -486,6 +487,51 @@ def test_session_takeover_is_built_in_and_never_released():
     session.cleanup()
     assert agent.instruct("复盘一下 3 号").execute() != "", "一局一命：局后法官仍在"
     assert not root.exists(), "cleanup 之后不该在磁盘上留下这一局的目录"
+
+
+def test_the_game_scratch_lives_in_the_judge_agent_tempdir():
+    """座位会话文件与复盘产物放在法官 agent 自己的临时目录里，而不是散落 /tmp。
+
+    xun 的 `Workspace.tempdir` 由 xun 负责收（GC 时删），所以哪怕 `cleanup()` 没跑到
+    （崩在半路、进程被杀）也不会留下垃圾 —— 自己 `mkdtemp()` 那版本就是漏在这儿。
+    两条都要钉住：位置对，且 `cleanup()` 只收自己那一坨、**不许**把 agent 的临时目录整个删掉。
+    """
+    from .test_channels import _make_agent
+
+    module = _ext()
+    agent = _make_agent()
+    session = module.GameSession(agent)
+    tempdir = Path(agent.workspace.tempdir.path)
+    assert session.root_dir.parent == tempdir, (session.root_dir, tempdir)
+    assert session.root_dir.is_dir(), "座位工作目录的父目录要先备好（Workspace.prepare 不管孙辈）"
+    session.cleanup()
+    assert not session.root_dir.exists(), "这一局的目录要收掉"
+    assert tempdir.exists(), "那是借 agent 的临时目录，不许把人家整个删了"
+
+
+def test_stopping_before_the_cards_does_not_promise_a_review():
+    """开局设置里就被 stop：回执不许说「可以问复盘」—— 那口子还没开，教练也没东西可读。
+
+    `discuss_with_coach` 要读 `engine.state`，此时引擎还没建，给口子就是当场报错。
+    会话用真的 `GameSession`（`review_open` 得是真话），回执则读 `FakeAgent.info` 收到的那些。
+    """
+    from .test_channels import _make_agent
+
+    module = _ext()
+    judge = FakeAgent(name="pre-stop")
+    session = module.GameSession(_make_agent())
+    assert session.review_open is False, "没打完就不该有讨论口子"
+    with module._lock:
+        module._games[judge.identifier] = module._Record(session=session)
+    try:
+        module._stop(judge)
+        joined = " ".join(judge.messages)
+        assert "没有复盘可问" in joined, joined
+        assert "随时问它" not in joined, f"还没开局就承诺复盘：{joined}"
+    finally:
+        with module._lock:
+            module._games.pop(judge.identifier, None)
+        session.cleanup()
 
 
 def test_rule_tweaks_do_not_leak_into_the_shared_presets():

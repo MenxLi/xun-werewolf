@@ -27,7 +27,7 @@ from typing import Sequence
 def mode() -> str:
     """形态：`html`（默认）或 `text` —— `WEREWOLF_UI=text` 强制走纯文本。
 
-    不必探测 xun 有没有 `HTMLInfoEvent`：入口的 `api_min_version` 已经把它钉在 1.4，
+    不必探测 xun 有没有 `HTMLInfoEvent`：入口的 `api_min_version` 已经把它钉在 1.5，
     老版本根本加载不起来。CLI 那边 xun 自己会调 `HTMLInfoEvent.to_text()` 降级。
     """
     forced = (os.environ.get("WEREWOLF_UI") or "").strip().lower()
@@ -321,7 +321,7 @@ class Card:
     def event(self):
         """发事件的 payload：纯文本形态直接发 `InfoEvent`，否则发 HTML 卡。"""
         if mode() == "html":
-            from xun.display_abstract import HTMLInfoEvent
+            from xun.core.display_event import HTMLInfoEvent
             return HTMLInfoEvent(html=self.html(), title=(self.title or self.soft_title) or None)
-        from xun.display_abstract import InfoEvent
+        from xun.core.display_event import InfoEvent
         return InfoEvent(message=self.text())

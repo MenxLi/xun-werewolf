@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from xun import Agent, NullDisplay, ToolBox, Workspace
-from xun.config import load_config
+from xun.core.config import load_config
 
 from ..engine.events import GM, K_WOLF_VOTE, PUBLIC
 from ..engine.state import GameState

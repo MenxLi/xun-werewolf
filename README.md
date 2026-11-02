@@ -40,7 +40,7 @@ ln -s "$(pwd)/werewolf" "$XUN_HOME_DIR/extensions/werewolf"   # 仓库里的 wer
 用 `python pack.py` 打出的 zip 也一样 —— 里面就是同一个 `werewolf/` 文件夹，解到同一个目录即可：
 `unzip dist/werewolf-<时间戳>.zip -d "$XUN_HOME_DIR/extensions/"`。包里只有运行时（引擎、卡片、
 SVG 资产），README、AGENTS、pack.py、`tests/` 都不进去（`pack.py --check` 会钉住这条）。
-前提：xun 里配好了模型与 key（AI 座位真的会调模型）、**Python 3.12+**（照 xun 的 `requires-python`）、**xun 1.4+**（插件按最新源码的 xun 构建，不留旧版分支：执行态叫 `run_scope`、卡片跳过自动确认的参数是 `skip_auto_confirm`）。
+前提：xun 里配好了模型与 key（AI 座位真的会调模型）、**Python 3.12+**（照 xun 的 `requires-python`）、**xun 1.5+**（插件按最新源码的 xun 构建，不留旧版分支：执行核心在 `xun.core` 包里、显示事件带 `span`、steering 接管了「运行中」时的输入）。
 
 ## 玩
 

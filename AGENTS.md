@@ -39,6 +39,7 @@ python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 
 - **发事件是两步**：xun 的 `Agent.display_event` = 记进环形缓冲 + 广播。法官替玩家发气泡要换作者，
   只能手工构造事件，那就**必须自己补上记缓冲**（`display._record_event`）—— 前端刷新/重连读的是
   缓冲那份（`GET /api/events`），漏记的话法官的播报还在、玩家发言全没了，现场少一半还看不出来。
+  1.5 起 `DisplayEvent` 还有个**必填**的 `span`，绕开 `display_event` 的人得自己补上快照。
 - **法官卡片一律带“别自动确认”那个标记**：xun 的 auto-confirm 判断在显示层，配置开着就会替玩家点卡片，一局在玩家眼皮底下悄悄跑完。**长文本不进卡片** —— 发言与遗言等的是会话输入框里那句话，卡片只说“轮到你、你排第几”。
 - **身份牌是唯一强调“你是谁”的时刻**，且只出现在真人自己那张卡上；局面看板照旧“看不到身份就不上色”。
 - **命令面最小**：开新局 / status / stop / ?，再加一个 `/auto-say`（法官替你说一句），都不带参数；开局设置一律走卡片并给默认值。**加载时只注册 `/werewolf`**：`/auto-say` 与「收起自带命令 + 工具箱」都发生在 `/werewolf` 那一刻（`takeover_command_surface`），不是引擎真开局那一刻 —— 写在 `play()` 里就得等开局卡片全点完，中途弃卡就永远不收，而接管是终身的。前端没有「命令表变了」的播报事件，补全菜单可能滞后，但命令是真的不再响应。别加“退出 / 重开”—— 接管摘不掉，那只会是假出口。
@@ -54,6 +55,13 @@ python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 
 - **接管是终身的**：不加开关、不加“交还”、不加退出命令。把 agent 还给用户的唯一出口是前端“新建会话”。
 - **一个 agent 只挂一份钩子**：一次性的钩子会让第二条消息漏给模型；挂两份更糟 —— 后写的空结果覆盖前一份回复，用户发话全场没人应答。所以一局一命、记录永不删除（局后还要靠它读局面复盘），第二次开新局一律拒绝。
 - **播报状态跨线程共享**：改这些状态的入口一律加锁；**等用户点卡片的那一步不许持锁** —— 一等可能几分钟，锁着就把整局堵死。
+- **法官永不进执行态**（1.5 的 steering）：「运行中」时用户那句话不进执行循环，而是进
+  `SteeringStore` 等 execution step 注入 —— 法官被 takeover 短路，一次 step 都没有，没人替它倒。
+  所以旧的 `_sync_running`（AI 在算就借一层 `run_scope`）删了：那是拿用户的话换侧栏徽章。
+  **但借不借由不得法官**：`Agent.execute` 自己那层也算运行中，法官答话期间进来的话照样进缓冲。
+  秒级的窗口由 `_takeover` 把缓冲倒出来兜住（倒过必须清空）；唯一一段人类真能撞长的是**局后教练
+  那一次几十秒**，所以 `_drain_coach` 每轮都把缓冲收进讨论队列。我们自己收口时广播不了「已消费」
+  （那是显示层回调），前端那张 steering 卡要等这次执行结束才消失，不是没送到。三处各钉一条测试。
 
 ## 提问、超时与记忆
 
@@ -67,10 +75,13 @@ python pack.py && python pack.py --check dist/<最新>.zip   # 打包 + 照 xun 
 - **会话消息按 xun 的类型化消息类读**：`msg.role`、`SystemPrompt.content`、`completion_param()` ——
   `conversation.messages` 里不是 dict，写 `msg.get("role")` 会在第一次决策就炸。测试里的
   会话桩也因此直接用 xun 真的那个 `Conversation`（桩不像真的就测不到这类事）。
-- **1.4 的两个名字别再写错**：执行态的上下文管理器是 `run_scope`（旧名 cancellable_execution），
-  卡片跳过自动确认的入参是 `skip_auto_confirm`（旧名带下划线）。另外 1.4 起
-  `agent.system()` **不再顺手复位** `is_compressed`：接回角色设定时必须显式写 False
+- **import 只有两个口**：公共名字 `from xun import ...`，核心内部 `from xun.core.<模块>`
+  （1.5 收进了 `xun.core`，`xun.config`、`xun.display_abstract` 那批顶层名**已不存在**，照着写就是
+  第一次加载就崩）。事件负载在 `xun.core.display_event`，默认命令与 steering 在 `xun.session`。
+- **两个名字别再写错**：卡片跳过自动确认的入参是 `skip_auto_confirm`（旧名带下划线）；
+  `agent.system()` 自 1.4 起**不再顺手复位** `is_compressed`，接回角色设定时必须显式写 False
   （`llm_player.write_system`），否则 xun 会把整条 system 当「已压缩的历史」包进它那份助手说明。
+  （`run_scope` 这个名字还在，法官已经不碰它了 —— 理由见上面「法官永不进执行态」。）
 - 长会话的历史压缩交给 xun 的 auto_compact；插件里的字符上限只是阈值之上的兜底硬顶，
   剪完的老会话要停在一条 user 消息上（有的 provider 不接受以 assistant 开头的会话）。
 - **别顺手调小记忆旋钮**（提要带几条事件、每条留多少字、滚动窗口留几轮）：这三个数决定玩家还记不记得前面谁说过什么，下限钉在测试里。

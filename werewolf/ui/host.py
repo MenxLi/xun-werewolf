@@ -21,17 +21,16 @@ from __future__ import annotations
 
 import functools
 import re
-import contextlib
 import threading
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
-from xun.display_abstract import (
+from xun.core.display_event import (
     AgentInfo, DisplayEvent, InfoEvent, ModelMessageEvent, ModelWorkingEvent, WarningEvent,
 )
-from xun.types import CancelledError
+from xun.core.types import CancelledError
 
 from ..engine.config import WIN_LABEL
 from ..engine.events import Event
@@ -114,6 +113,18 @@ def take_texts(agent: Any) -> list[str]:
     return [text for text in (_text_of(message) for message in popped) if text.strip()]
 
 
+def take_steering(agent: Any) -> list[str]:
+    """倒出 1.5 的 steering 缓冲（比 `take_texts` 那批更早，排在前面），只要文本。
+
+    「运行中」不看谁开的头：`Agent.execute` 自己就进 `run_scope`，法官答话期间用户再发的话
+    不进循环、只进缓冲，而 xun 那份 flush 挂在 `after_execution_step` —— takeover 让法官
+    一次 step 都没有。秒级窗口下次执行就补上；**局后教练那一次要几十秒**，见 `_drain_coach`。
+    """
+    from xun.session import SteeringStore
+
+    return [instruction.content for _, instruction in SteeringStore.of(agent).take()]
+
+
 class HostPresenter:
     """把 GameState 的变化翻译成前端能读的东西。`agent` 是被接管的那个 agent（会话主 agent）。"""
 
@@ -122,7 +133,7 @@ class HostPresenter:
         self.display = agent.display
         self.state: GameState | None = None
         self.stop_event = threading.Event()
-        # 接管是终身的：xun 的 HookRegistry 没有 remove，而我们根本不打算交还 ——
+        # 接管是终身的：1.5 起 `hooks.add` 会回一个签名、也真能 `remove`，但我们不打算交还 ——
         # 开局那一刻起，这个 agent 的每一次执行都由法官回答（`execute` 永不进模型）。
         # 想把这个 agent 还回正常对话，唯一的出口是前端的「新建会话」。
         # 所以这里只在构造时挂一次钩子；一局一命也保证了同一个 agent 上不会挂第二份
@@ -149,8 +160,6 @@ class HostPresenter:
         self._phase_title = ""                 # 当前阶段名：给被气泡切断的后续块当标题
         self._waiting: dict[str, _Wait] = {}   # 作者 → 还在等它发言/在算的状态
         self._opened: dict[int, str] = {}      # seat → 打招呼用的作者标签（`thought` 据此关窗口）
-        # 包着「有 AI 座位在算」那段等待的执行态范围；None = 法官现在看起来是闲的
-        self._run_stack: contextlib.ExitStack | None = None
         self._day_seen = 0
         self._chunks = 0
         # 局后的口子（AGENTS.md）：`coach` 由 GameSession 挂进来，只有 `game_over` 之后
@@ -173,7 +182,7 @@ class HostPresenter:
         但它们是自己 new 出来的 agent，压根没注册这个钩子）——这里照样接管并回一句哑话，
         宁可不回答也不让模型掺进这一局。
         """
-        texts = [] if args.schema is not None else take_texts(args.agent)
+        texts = [] if args.schema is not None else take_steering(args.agent) + take_texts(args.agent)
         args.takeover_result = self.on_user_message(texts)
 
     def on_user_message(self, texts: Sequence[str]) -> str:
@@ -250,6 +259,8 @@ class HostPresenter:
         answer = ""
         while True:
             with self._queue_lock:
+                # 答话期间进来的话在 steering 缓冲里（见 `take_steering`），收进队列一起答
+                self._coach_queue.extend(take_steering(self.agent))
                 if not self._coach_queue:
                     self._draining = False
                     return answer
@@ -287,35 +298,6 @@ class HostPresenter:
         if text and text.strip():
             self.agent.display_event(InfoEvent(message=text.strip("\n")))
 
-    def _sync_running(self) -> None:
-        """把「有 AI 座位在算、且没在等真人」这段等待包进 agent 的执行态。
-
-        xun 在 `run_scope`（`running_state.py`）最外层进出时发 `AgentRunningStartEvent` /
-        `AgentRunningEndEvent`，前端据此点亮「运行中」（侧栏徽章、活动条转圈、底部光谱线）。
-        不包的话，游戏线程再怎么发事件，前端都认定这个 agent 闲着 —— 等 AI 输出的那几秒
-        界面看着就像卡死（`ModelWorkingEvent` 救不了：活动条的 working 只认 runningAgents）。
-
-        **等真人的时候必须松开**：`_cards`/`_awaiting` 不为零那段时间用户要能打字提问，
-        而前端处于运行态时把「发送」换成「停止」（App.vue 直接拒发），卡片倒是照样能点
-        （答复走 WS 的 `_pending.respond`，不经过执行循环）。
-        """
-        want = bool(self._waiting) and not self._cards and self._awaiting <= 0
-        with self._lock:
-            if want == (self._run_stack is not None):
-                return
-            if want:
-                stack = contextlib.ExitStack()
-                stack.enter_context(self.agent.run_scope())
-                self._run_stack = stack
-            else:
-                stack, self._run_stack = self._run_stack, None
-                try:
-                    stack.close()
-                except CancelledError:
-                    # 用户按了「停止」：CM 退出时发现被取消会抛这个，停局另有其人
-                    # （`stop_event` + 唤醒挂着的卡片），这里不接这个话
-                    pass
-
     def info(self, text: str) -> None:
         """系统提示（一行小字）。"""
         self._info(render.plainify(text))
@@ -335,8 +317,8 @@ class HostPresenter:
     def thinking(self, state: GameState, seat: int, kind: str) -> None:
         """引擎打招呼：某座位要说活了（只有 AI 会走到这儿，人类是输入框发言）。
 
-        两个效果：文本形态打一行「running」，网页形态把这段等待包进执行态（`_sync_running`），
-        前端于是显示「运行中」。不占屏幕、不等超时。
+        一条 `ModelWorkingEvent` 两种形态都用：文本里打一行「🟢 某某 running」，网页里
+        是一枚转圈的思考气泡。不占屏幕、不等超时。
         """
         author = render.speech_author(seat, kind)
         # 同座位换环节时，上一环节漏关的窗口必须收尾：新标签一覆盖 `_opened[seat]`，
@@ -359,15 +341,13 @@ class HostPresenter:
         author = self._opened.pop(seat, None)
         if author:
             self._waiting.pop(author, None)
-        self._sync_running()
 
     @_synchronized
     def thinking_author(self, author: str) -> None:
         """某座位开始思考：登记它的等待窗口，并把这件事告诉显示层。
 
         这条 `ModelWorkingEvent` 管的是**文本形态**（终端会打一行「🟢 某某 running」）；
-        作者用手工造的 `ww-*` 标签无所谓。网页形态的活动指示不看它 —— 那由执行态决定，
-        见 `_sync_running`。
+        作者用手工造的 `ww-*` 标签无所谓。网页侧栏的「运行中」徽章不看它，也不由我们点亮。
 
         同一个作者重复打招呼不叠加，只发一个窗口。
         """
@@ -379,7 +359,6 @@ class HostPresenter:
                            workdir=self.self_info.workdir),
             call_id=call_id)
         self.agent.display_event(ModelWorkingEvent(model_call_id=call_id))
-        self._sync_running()
 
     @_synchronized
     def say_as(self, author: str, text: str, identifier: str | None = None) -> None:
@@ -400,15 +379,16 @@ class HostPresenter:
         # 绕开 `agent.display_event` 是为了换作者（它把作者钉成 agent 自己），但绕开就得
         # 自己补上它做的另一件事 —— 记环形缓冲：`GET /api/events` 吐的就是那份，前端刷新/
         # 重连靠它重建现场。只发不记的话，法官的播报还在、玩家发言全没了，现场少一半还看不出来。
+        # `span` 同理（1.5 起必填、没有默认值）：绕开 `display_event` 就得自己补发出时的快照。
         event = DisplayEvent(
             name="ModelMessageEvent",
             agent=agent_info,
             payload=ModelMessageEvent(model_call_id=call_id, content=text.strip(),
                                       total_tokens=0),
+            span=self.agent.span.snapshot(),
         )
         self.display._record_event(event)     # noqa: SLF001 —— display_event 也是这么做的
         self.display.on_event(event)
-        self._sync_running()   # 这一个座位落地了，其余可能还在算（`on_events` 也经这儿）
 
     # ---------------------------------------------------------------- 状态与播报
     @property
@@ -538,7 +518,6 @@ class HostPresenter:
         with self._input:
             self._auto = False
             self._input.notify_all()             # 等输入的环节立刻醒
-        self._sync_running()                     # 先松开执行态，别让用户对着一个假「运行中」
         if self._cards:                          # 挂着的卡片只能靠 cancel_event 唤醒
             threading.Thread(target=self._poke_until_cards_close, daemon=True).start()
 
@@ -571,7 +550,6 @@ class HostPresenter:
             self._coach_queue.clear()
             self._draining = False
         self._auto = False
-        self._sync_running()                   # 局 end 了还挂着执行态 = 永远亮着的谎
         self._flush()                          # 中途终止也别把播报吞了
 
     @_synchronized
@@ -595,7 +573,6 @@ class HostPresenter:
                "↳ 点下面的按钮选一个，再点「提交」。这一步别在输入框里打字。")
         message = f"{message}\n{how}" if message else how
         self._cards += 1
-        self._sync_running()
         try:
             outcome = self.agent.get_choice(
                 prompt=prompt,
@@ -613,7 +590,6 @@ class HostPresenter:
             raise GameAborted("用户取消了这局") from exc
         finally:
             self._cards -= 1
-            self._sync_running()
         if self.stop_requested():
             raise GameAborted("会话已关闭")
         return outcome.choice
@@ -639,7 +615,6 @@ class HostPresenter:
         self.card(H.Card(title=title, parts=parts))
         with self._input:
             self._awaiting += 1
-            self._sync_running()
             try:
                 while not self._inbox and not self._auto:
                     if self.stop_requested():
@@ -653,7 +628,6 @@ class HostPresenter:
                 self._auto = False
             finally:
                 self._awaiting -= 1
-                self._sync_running()
         # 出锁再叫模型：握着 Condition 的锁跑一次模型请求，会把 `stop()` 和别的播报一起别住
         if auto is None:                   # 只有会代说的环节（发言/警上/遗言）才传这个回调
             raise GameAborted("这一步没法代说，请直接用输入框回答")

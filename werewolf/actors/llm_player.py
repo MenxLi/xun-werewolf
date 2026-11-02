@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from xun import Agent, NullDisplay, ToolBox, Workspace
-from xun.config import load_config
-from xun.conversation_message import SystemPrompt
+from xun.core.config import load_config
+from xun.core.conversation_message import SystemPrompt
 
 from ..engine.ask import Ask, KINDS
 from ..engine.config import GameConfig

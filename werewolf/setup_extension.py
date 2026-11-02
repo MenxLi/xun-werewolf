@@ -27,7 +27,7 @@ from typing import Any, Sequence
 from xun import Command, extension_attr
 
 COMMAND_NAME = "werewolf"
-API_MIN_VERSION = "1.4.0"
+API_MIN_VERSION = "1.5.0"
 """本插件要求的 xun 版本：入口的 `@extension_attr` 与装错提示共用这一个数。"""
 AUTO_COMMAND = "auto-say"
 START_DESCRIPTION = "开一局狼人杀（1 真人 + N AI）；开局设置用卡片问你（每步都有默认值），" \
@@ -143,8 +143,8 @@ def _broken_install_hint(exc: BaseException) -> str:
         f"入口现在在：`{Path(__file__)}`\n"
         f"底层报错：`{type(exc).__name__}: {exc}`\n\n"
         "也可能是 **xun 太旧**：本插件按 xun 最新源码构建，入口声明的是 "
-        f"`api_min_version={API_MIN_VERSION}`（1.4 起执行态是 `run_scope`、卡片是 "
-        "`skip_auto_confirm`）—— 先确认手头的 xun 已更新，再照下面的修法装。\n\n"
+        f"`api_min_version={API_MIN_VERSION}`（1.5 起执行核心在 `xun.core` 包里：`xun.config`、"
+        "`xun.display_abstract` 这些顶层模块名已经没有了）—— 先确认手头的 xun 已更新，再照下面的修法装。\n\n"
         "修法是**把整个 `werewolf/` 目录**放到 extension 位置（目录名叫 `werewolf`，别只拷入口）：\n"
         "  `cp -r <本仓库>/werewolf <XUN_HOME>/extensions/werewolf`\n"
         "  或 `unzip werewolf-<时间戳>.zip -d <XUN_HOME>/extensions/`"
@@ -154,7 +154,7 @@ def _broken_install_hint(exc: BaseException) -> str:
 def _resolve_model_name() -> str:
     """没指定模型时，用 xun 配置里的模型；配置没写就问 provider 要第一个。"""
     import openai
-    from xun.config import load_config
+    from xun.core.config import load_config
 
     cfg = load_config()
     if cfg.model.name:
@@ -619,10 +619,10 @@ def start_game(agent: Any, arguments: Sequence[str] | None = None) -> None:
     parsed = parse_arguments(arguments)
 
     if parsed.action == "help":
-        agent.info(USAGE_LONG)
+        agent.display_info(USAGE_LONG)
         return
     if parsed.unknown:
-        agent.info("没看懂这些参数：" + "、".join(parsed.unknown) + "\n\n" + USAGE_LONG)
+        agent.display_info("没看懂这些参数：" + "、".join(parsed.unknown) + "\n\n" + USAGE_LONG)
         return
     if parsed.action == "status":
         _status(agent)
@@ -633,12 +633,12 @@ def start_game(agent: Any, arguments: Sequence[str] | None = None) -> None:
 
     reason = guard_reason(agent)
     if reason:
-        agent.info(reason)
+        agent.display_info(reason)
         return
     try:
         _load_engine()                                 # 懒加载引擎；装错了这里给出可操作指引
     except Exception as exc:
-        agent.info(str(exc))
+        agent.display_info(str(exc))
         return
 
     agent_key = getattr(agent, "identifier", str(id(agent)))
@@ -649,10 +649,10 @@ def start_game(agent: Any, arguments: Sequence[str] | None = None) -> None:
         # 所以同一条会话上不许出现第二个法官 —— 第二个 HostPresenter 会在同一个 agent 上再挂
         # 一份钩子，两份钩子都写 takeover_result，用户发的话就没人答了。
         if previous.session.alive:
-            agent.info("这局还在进行中。要终止用 `/werewolf stop`，看局面用 `/werewolf status`。")
+            agent.display_info("这局还在进行中。要终止用 `/werewolf stop`，看局面用 `/werewolf status`。")
         else:
-            agent.info("这个会话已经打过一局了，法官不改口重开 —— 复盘和局面随时问它。\n\n"
-                       "要再开一局：点前端的「新建会话」，那才是把 agent 交回给你自己的方式。")
+            agent.display_info("这个会话已经打过一局了，法官不改口重开 —— 复盘和局面随时问它。\n\n"
+                               "要再开一局：点前端的「新建会话」，那才是把 agent 交回给你自己的方式。")
         return
 
     session = GameSession(agent, model_name=None)
@@ -666,10 +666,10 @@ def start_game(agent: Any, arguments: Sequence[str] | None = None) -> None:
     session.start_in_background()
 
     # 只回执一句：怎么用交给法官的欢迎卡（这里以前抄了一份，命令改了就成了过期文案）
-    agent.info("狼人杀开始了：这个会话从现在起由法官接管 —— 开局设置一张张卡片问你，"
-               "发言直接发在输入框里。这个 agent 自用的命令与工具箱已收起，"
-               "新注册出来的 `/auto-say` 是让法官替你说一句。"
-               "一局一会话：打完了它还在，复盘随时问。")
+    agent.display_info("狼人杀开始了：这个会话从现在起由法官接管 —— 开局设置一张张卡片问你，"
+                       "发言直接发在输入框里。这个 agent 自用的命令与工具箱已收起，"
+                       "新注册出来的 `/auto-say` 是让法官替你说一句。"
+                       "一局一会话：打完了它还在，复盘随时问。")
 
 
 def takeover_command_surface(agent: Any) -> None:
@@ -701,21 +701,21 @@ def takeover_command_surface(agent: Any) -> None:
 def _stop(agent: Any) -> None:
     record = active_record(agent)
     if record is None:
-        agent.info("当前会话没有狼人杀。用 `/werewolf` 开一局。")
+        agent.display_info("当前会话没有狼人杀。用 `/werewolf` 开一局。")
         return
     record.stopped = True
     try:
         record.session.stop()
     except Exception as exc:                           # pragma: no cover
-        agent.info(f"终止时出了点问题：`{type(exc).__name__}: {exc}`")
+        agent.display_info(f"终止时出了点问题：`{type(exc).__name__}: {exc}`")
         return
     if record.session.review_open:
-        agent.info("这一局已终止。法官还留在这条会话里，想问刚才那局的复盘随时问它。")
+        agent.display_info("这一局已终止。法官还留在这条会话里，想问刚才那局的复盘随时问它。")
     else:
         # 开局设置里就被停：这局根本没发到牌桌上，讨论口子也没开（教练要读 engine.state，
         # 那时它还不存在）—— 说「可以问复盘」就是空头支票
-        agent.info("这一局还没发到牌桌上（开局设置被终止），没有复盘可问 —— 这条会话仍是法官，"
-                   "要开一局请新建一个会话。")
+        agent.display_info("这一局还没发到牌桌上（开局设置被终止），没有复盘可问 —— 这条会话仍是法官，"
+                           "要开一局请新建一个会话。")
 
 
 def auto_say(agent: Any, arguments: Sequence[str] | None = None) -> None:
@@ -724,28 +724,28 @@ def auto_say(agent: Any, arguments: Sequence[str] | None = None) -> None:
     只管这一次：不接管发言权，也不影响你的下一句。得正等着一句话时才有用。
     """
     if arguments:
-        agent.info("`/auto-say` 不带参数。")
+        agent.display_info("`/auto-say` 不带参数。")
         return
     record = active_record(agent)
     if record is None:
-        agent.info("当前会话没有狼人杀。用 `/werewolf` 开一局。")
+        agent.display_info("当前会话没有狼人杀。用 `/werewolf` 开一局。")
         return
     if record.session.host.request_auto_speech():
-        agent.info("好，这一句法官替你说；下一句还是你自己说。")
+        agent.display_info("好，这一句法官替你说；下一句还是你自己说。")
     else:
-        agent.info("现在没轮到你说话。`/auto-say` 只管一次：等你发言（含警上发言、遗言）的时候用。")
+        agent.display_info("现在没轮到你说话。`/auto-say` 只管一次：等你发言（含警上发言、遗言）的时候用。")
 
 
 def _status(agent: Any) -> None:
     record = active_record(agent)
     if record is None:
-        agent.info("当前会话没有狼人杀。用 `/werewolf` 开一局。")
+        agent.display_info("当前会话没有狼人杀。用 `/werewolf` 开一局。")
         return
     host = record.session.host
     try:
         host.publish_status()                          # 一张看板卡（不含未公开信息）
         if record.stopped:
-            agent.info("这一局已经终止了，上面是终局局面。")
+            agent.display_info("这一局已经终止了，上面是终局局面。")
     except Exception as exc:                           # pragma: no cover
-        agent.info(f"读不到局面：`{type(exc).__name__}: {exc}`（这一局已经终止了）"
-                   if record.stopped else f"读不到局面：`{type(exc).__name__}: {exc}`")
+        agent.display_info(f"读不到局面：`{type(exc).__name__}: {exc}`（这一局已经终止了）"
+                           if record.stopped else f"读不到局面：`{type(exc).__name__}: {exc}`")

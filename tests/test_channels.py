@@ -24,8 +24,11 @@ from werewolf.ui import render
 from . import harness
 from werewolf.ui.host import REVIEWER, HostPresenter
 from xun import Workspace
-from xun.display_abstract import AgentInfo, DisplayAbstract, DisplayEvent
-from xun.conversation import Conversation
+from xun.core.display_abstract import DisplayAbstract
+from xun.core.display_event import AgentInfo, DisplayEvent
+from xun.core.tracing import SpanContext
+from xun.core.agent_state import AgentState
+from xun.core.conversation import Conversation
 
 
 class _Rec(DisplayAbstract):
@@ -79,11 +82,15 @@ class _StubAgent:
         self.name = "会话"
         self.identifier = "agent-main"
         self.agent_info = AgentInfo(name=self.name, identifier=self.identifier,
-                                    description="", workdir=Path.cwd())
+                                    workdir=Path.cwd())
         # 用 xun 真的 Workspace：法官的工作目录建在 `workspace.tempdir` 底下，自编一个
         # 只有 workdir 的假 workspace 就测不到那条路。每个实例一份，才像真 agent 那样
         # 各占一块临时目录（共用会把并行夹具里的另一局一起收掉）。
         self.workspace = Workspace(workdir=Path.cwd())
+        # 真的 `SpanContext`（1.5 起每个事件都带它）与真的 `AgentState`
+        # （steering 缓冲是它上面懒建的 entry）：桩不给就是假 agent。
+        self.span = SpanContext()
+        self.state = AgentState()
         self.hooks = SimpleNamespace(before_execution=_StubHooks())
         self.conversation = Conversation()
         self.cancel_event = threading.Event()
@@ -106,7 +113,8 @@ class _StubAgent:
 
     def display_event(self, event) -> None:
         # 照 xun 的 `AgentDisplayMixin.display_event`：先记进环形缓冲，再交给 display
-        wrapped = DisplayEvent(name=type(event).__name__, agent=self.agent_info, payload=event)
+        wrapped = DisplayEvent(name=type(event).__name__, agent=self.agent_info,
+                               payload=event, span=self.span.snapshot())
         self.display._record_event(wrapped)
         self.display.on_event(wrapped)
 
@@ -810,8 +818,9 @@ def test_public_board_never_assigns_identities_or_counts_wolves():
 def test_working_windows_open_and_close_in_pairs():
     """一次思考只打一行 running，收尾必须配对。
 
-    文本形态靠这条 `ModelWorkingEvent` 打「🟢 某某 running」，所以一个窗口只能有一条；
-    网页形态不再靠补发事件顶圆点（那套 `_rearm` 随旧前端一起作废），它看的是执行态。
+    文本形态靠这条 `ModelWorkingEvent` 打「🟢 某某 running」，所以一个窗口只能有一条。
+    网页形态的活动指示从来不看它（那套 `_rearm` 随旧前端一起作废），法官也不再去借执行态
+    （见下面「执行态与 steering」那一节）—— 这条事件因此是「谁在算」唯一的出口。
     """
     agent = _make_agent()
     host = HostPresenter(agent)
@@ -827,10 +836,8 @@ def test_working_windows_open_and_close_in_pairs():
         host.info("播报一条")
         host.thinking(state, 3, K_SPEECH)
         assert lit() == 1, "同一窗口不叠加、也不补发顶尾部 —— 否则终端被 running 刷满"
-        assert agent.running is True
         host.thought(state, 3)
         assert lit() == 1, "收尾不该再补一条 running"
-        assert agent.running is False, "算完了执行态必须松开"
     finally:
         host.cleanup()
 
@@ -937,11 +944,10 @@ def test_the_line_the_judge_spoke_is_heard_by_the_table():
         host.cleanup()
 
 
-# ---------------------------------------------------------------- 执行态（网页的「运行中」）
-# 前端判断这个 agent 忙不忙，只看 xun 在执行态进出时发的 AgentRunningStart/EndEvent。
-# 游戏跑在后台线程、从不进执行态，所以「AI 正在算」那几秒必须由法官主动包一段范围，
-# 否则界面写着「空闲」、什么都不转，看着就像卡死。反过来，等真人的时候必须松开：
-# 那段时间前端把「发送」换成了「停止」，扣着范围就是扣着用户打字的能力。
+# ---------------------------------------------------------------- 执行态与 steering
+# 1.5 起「运行中」不只是徽章：那句话不进执行循环，而是进 `SteeringStore`，等 execution
+# step 之间注入 —— 而 takeover 让法官一次 step 都没有，没人替它倒。所以法官**永不进执行态**
+# （连 `Agent.execute` 自己那层都算），用户的话只有一条路。
 def _busy_judge() -> tuple[HostPresenter, _StubAgent]:
     agent = _make_agent()
     host = HostPresenter(agent)
@@ -949,45 +955,32 @@ def _busy_judge() -> tuple[HostPresenter, _StubAgent]:
     return host, agent
 
 
-def test_the_judge_enters_the_run_state_while_a_seat_is_computing():
+def test_the_judge_never_enters_the_run_state():
+    """AI 在算、卡片挂着、局末收尾 —— 都不许占执行态（一占，用户那句话就改道 steering）。
+
+    以前这里包一整套 `_sync_running` 就为了让侧栏亮一下。
+    """
     host, agent = _busy_judge()
-    assert agent.running is False, "没开局、没人在算，不该抢一个「运行中」"
-
-    host.thinking(host.state, 3, K_SPEECH)
-    assert agent.running is True, "AI 座位正在算，前端必须看得见它在忙"
-
-    host.thinking(host.state, 7, K_SPEECH)     # 并发环节：第二个座位也在算
-    assert agent.run_depth == 1, "同一批等待只能包一层，退出时才会干净"
-
-    host.thought(host.state, 3)
-    assert agent.running is True, "7号 还在算，不能因为一个座位落地就装闲"
-
-    host.thought(host.state, 7)
-    assert agent.running is False, "都落地了还亮着「运行中」就是撒谎"
-    assert agent.run_depth == 0
-
-
-def test_a_pending_card_leaves_the_run_state_so_the_user_can_answer():
-    """卡片挂着等真人时不能占着执行态 —— 网页那段时间只给「停止」按钮。"""
-    host, agent = _busy_judge()
-    host.thinking(host.state, 3, K_SPEECH)     # 还有个 AI 在算
+    host.thinking(host.state, 3, K_SPEECH)     # AI 座位正在算
+    assert agent.run_depth == 0, "AI 在算也不借执行态：徽章是装饰，用户的话不是"
 
     seen = {}
 
     def fake_choice(prompt, choices, **kwargs):
-        seen["running"] = agent.running
+        seen["depth"] = agent.run_depth
         return SimpleNamespace(choice=list(choices)[0], text="")
 
     host.agent.get_choice = fake_choice
     host.ask(prompt="今晚刀谁", choices=("1号", "2号"))
-    assert seen == {"running": False}, "卡片等真人时必须松开执行态"
-    assert agent.running is True, "卡片收了、3号 还在算 —— 「运行中」要接回去"
+    assert seen == {"depth": 0}, "卡片等真人时同样不许进执行态"
 
     host.thought(host.state, 3)
-    assert agent.running is False, "卡片收了、也算完了"
+    host.cleanup()
+    assert agent.run_depth == 0, "从没借过执行态，收尾自然没什么要还的"
 
 
-def test_waiting_for_a_spoken_line_frees_the_composer_and_reclaims_it_after():
+def test_waiting_for_a_spoken_line_leaves_the_agent_idle():
+    """等发言可以等几分钟 —— 这段时间 agent 必须一直是闲的，用户才打得了字。"""
     host, agent = _busy_judge()
     host.thinking(host.state, 3, K_SPEECH)     # 等真人的同时，另一只狼还在算
 
@@ -1002,27 +995,63 @@ def test_waiting_for_a_spoken_line_frees_the_composer_and_reclaims_it_after():
         if host._awaiting:
             break
         time.sleep(0.01)
-    got["waiting"] = agent.running           # 采样：这段时间用户要能打字
+    got["depth"] = agent.run_depth             # 采样：这段时间用户要能打字
 
     host.on_user_message(["我怀疑 5 号。"])
     thread.join(timeout=5)
     assert got["text"] == "我怀疑 5 号。"
-    assert got["waiting"] is False, "等输入框的时候不能占着执行态，否则那几秒打不了字"
-    assert agent.running is True, "输入落地，还在算的那只狼要把「运行中」接回去"
-
-    host.thought(host.state, 3)
-    assert agent.running is False
+    assert got["depth"] == 0, "等输入框的时候不能占执行态"
+    assert agent.run_depth == 0
 
 
-def test_cleanup_never_leaves_a_run_scope_behind():
-    host, agent = _busy_judge()
-    host.thinking(host.state, 3, K_SPEECH)
-    host.thinking(host.state, 5, K_SPEECH)
-    host.cleanup()
-    assert agent.running is False, "局 end 了还挂着执行态 = 永远亮着的「运行中」"
-    assert agent.run_depth == 0, "范围没配对退出，前端会一直显示忙"
+def test_a_question_asked_mid_coach_answer_is_not_left_in_the_buffer():
+    """教练答一句要几十秒，这期间打进来的下一句走 steering —— 它必须进同一个队列。
+
+    这是唯一一段人类真能撞上的「运行中」：局后讨论就地跑模型（`discuss` 不占着执行干等是
+    排队的规矩，但第一条就是在本线程答的）。漏了这一步，第二问会一直挂在缓冲里。
+    """
+    from xun.session import SteeringStore, UserInstruction
+
+    host = _judge()
+    host.game_over = True
+    seen: list[str] = []
+
+    def coach(question: str) -> str:
+        seen.append(question)
+        if question == "第一问":
+            SteeringStore.of(host.agent).add(UserInstruction(content="第二问", images=[]))
+        return f"答：{question}"
+
+    host.coach = coach
+    host.discuss(["第一问"])
+
+    assert SteeringStore.of(host.agent).take() == [], "第二问该被收进队列，不是烂在缓冲里"
+    answered = [e.payload.content for e in host.display.emitted if e.name == "ModelMessageEvent"]
+    assert any("答：第二问" in a for a in answered), answered
 
 
+def test_steering_buffer_is_drained_once_and_in_order():
+    """steering 缓冲必须被法官倒出来：不倒是吞了用户一句，重发是同一句说两遍。
+
+    倒出来的顺序按「先到先答」；这里记下送进 `on_user_message` 的那一批，不去嗅文案。
+    """
+    from xun.session import SteeringStore, UserInstruction
+
+    host = _judge()
+    agent = host.agent
+    store = SteeringStore.of(agent)
+    assert store.take() == [], "夹具：缓冲一开始是空的"
+
+    delivered: list[list[str]] = []
+    host.on_user_message = lambda texts: (delivered.append(list(texts)) or "") if texts else ""
+
+    store.add(UserInstruction(content="昨晚谁倒下了？", images=[]))
+    agent.instruct("现在还有谁活着？").execute()
+    assert delivered == [["昨晚谁倒下了？", "现在还有谁活着？"]], delivered
+    assert store.take() == [], "倒过就得清空，否则下一条执行又把同一句重播一遍"
+
+    agent.execute()                            # 没有新话，缓冲也该是空的
+    assert delivered == [["昨晚谁倒下了？", "现在还有谁活着？"]], "同一条 steering 答两次"
 def test_every_broadcast_is_recorded_for_a_reloading_frontend():
     """刷新过的浏览器只能从环形缓冲重建现场：漏记一条，那句话就永远看不见了。
 

@@ -61,10 +61,11 @@ class FakeAgent:
         self.config = type("Cfg", (), {"model": type("M", (), {"name": "some-model"})()})()
         self.messages: list[str] = []
 
-    def info(self, text: str) -> None:
+    # 只认 `display_*` 真名：`info`/`error` 是别名，源码里挂着「TODO: remove in v1.5」。
+    def display_info(self, text: str) -> None:
         self.messages.append(text)
 
-    def error(self, text: str) -> None:
+    def display_error(self, text: str) -> None:
         self.messages.append(text)
 
 
@@ -98,10 +99,13 @@ def test_the_judge_takes_over_the_command_surface():
     from types import SimpleNamespace
 
     from xun import Command, CommandRegistry, ToolBox
+    from xun.session import register_default_commands
 
     rt = _ext()
     agent = SimpleNamespace(toolbox=ToolBox().with_defaults(),
-                            command=CommandRegistry().with_defaults())
+                            # 1.5 起默认命令搬到 `xun.session`（`with_defaults` 没了）：
+                            # 夹具要的是「web 会话真挂着的那套命令」
+                            command=register_default_commands(CommandRegistry(), fs_extra=True))
     agent.command.register(Command(name=rt.COMMAND_NAME, handler=lambda a: None, description="x"))
     assert agent.toolbox.list_tools(), "夹具：默认工具箱该有工具"
     assert agent.command.get("clear") is not None, "夹具：默认命令在收起前要用得到"

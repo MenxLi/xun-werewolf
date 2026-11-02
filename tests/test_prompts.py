@@ -16,7 +16,7 @@ from werewolf.engine.config import PRESETS
 from werewolf.engine.engine import Engine
 from werewolf.engine.presenter import NullPresenter
 
-from xun.conversation import Conversation
+from xun.core.conversation import Conversation
 
 #: 这些环节只会问对应身份，测试时也发给对的人
 KIND_SEAT_ROLE = {KIND_WOLF_TARGET: "wolf", KIND_WITCH: "witch", KIND_SEER: "seer"}
@@ -279,7 +279,7 @@ def test_the_hard_trim_pins_the_head_and_starts_the_tail_on_a_user_message():
     `head=2` 是复盘教练（system 与那份对局记录都不许剪）。
     """
     from werewolf.actors.llm_player import trim_conversation
-    from xun.conversation_message import RawOpenAIMessage, SystemPrompt, UserMessage
+    from xun.core.conversation_message import RawOpenAIMessage, SystemPrompt, UserMessage
 
     def convo(extra_head: int = 1, trailing_assistant: bool = False) -> Conversation:
         conv = Conversation()

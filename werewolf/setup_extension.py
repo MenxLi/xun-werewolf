@@ -2,7 +2,7 @@
 
 装上之后在会话里发 `/werewolf` 就开局：1 个真人（你）+ 其余座位 AI，法官用卡片问你板子、
 座位、角色、规则，然后自动天黑。xun 的发现规则是
-`{XUN_HOME}/extensions/<name>/setup_extension.py`（`XUN_HOME` 未设时是 `./.xun`），
+`{XUN_HOME}/extensions/<name>/setup_extension.py`（`XUN_HOME` 未设时是 `~/.xun`），
 extension 的名字就是这个目录名，所以**本目录（`werewolf/`）就是那个 extension 目录**：
 整目录拷贝或 symlink 成 `{XUN_HOME}/extensions/werewolf/` 即可（`pack.py` 打的包也是这一层）。
 引擎子包（`engine/ actors/ ui/`）就在本文件旁边，因此引擎一律**相对导入**（见

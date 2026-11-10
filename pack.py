@@ -6,10 +6,10 @@
     python pack.py --check X.zip  # 校验必需文件，并照 xun 的方式真加载一次入口
 
 包里只有 `werewolf/` 这一个文件夹 —— 它就是 extension 目录本身（入口 `setup_extension.py`
-在它的根部），放进 `{XUN_HOME}/extensions/` 即可（`XUN_HOME` 未设时是 `./.xun`）：
+在它的根部），放进 `{XUN_HOME}/extensions/` 即可（`XUN_HOME` 未设时是 `~/.xun`，1.5 起）：
 
-    unzip dist/werewolf-<时间戳>.zip -d "${XUN_HOME:-$PWD/.xun}/extensions/"
-    # → ./.xun/extensions/werewolf/setup_extension.py（xun 的 home 在启动目录下，不在 ~）
+    unzip dist/werewolf-<时间戳>.zip -d "${XUN_HOME:-$HOME/.xun}/extensions/"
+    # → ~/.xun/extensions/werewolf/setup_extension.py
 
 里面只有运行时（引擎、演员、显示层、SVG 资产）；仓库根的 README.md、AGENTS.md、pack.py、
 tests/ 都不进包 —— `check()` 会钉住「顶层只有 `werewolf/`」这条。
@@ -73,7 +73,7 @@ def build(out_dir: Path) -> Path:
             f"packaged_at:   {datetime.now().isoformat(timespec='seconds')}\n"
             f"python:        {sys.version.split()[0]}\n\n"
             "这一层就是 extension 目录本身：只有运行时，没有 README/AGENTS/pack.py/tests。\n"
-            "用法：解压到 {XUN_HOME}/extensions/ 下（未设 XUN_HOME 时是 ./.xun/extensions/），\n"
+            "用法：解压到 {XUN_HOME}/extensions/ 下（未设 XUN_HOME 时是 ~/.xun/extensions/），\n"
             f"使最终路径成为 <extensions>/{PKG}/setup_extension.py，然后在 xun 会话里发 /werewolf\n"
         ))
     return zip_path

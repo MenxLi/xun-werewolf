@@ -4,7 +4,7 @@
 
 在会话里发 `/werewolf`，开一局 **1 个真人（你）+ 其余座位 AI** 的狼人杀：法官用卡片问你要什么板子、坐几号、演谁、规则怎么微调，然后自动天黑；你出局后还能继续问法官、要复盘。
 
-安装方法：把 `werewolf` 这个文件夹整个放进 `$XUN_HOME/extensions/` 下（默认 `./.xun/extensions/`），
+安装方法：把 `werewolf` 这个文件夹整个放进 `$XUN_HOME/extensions/` 下（默认 `~/.xun/extensions/`），
 目录名保持 `werewolf`，然后在 xun 会话里发 `/werewolf`。
 
 **本插件完全由 xun 驱动的 Agent 开发...不保证代码质量与稳定性。**
@@ -27,12 +27,13 @@
 
 ## 装
 
-xun 的 home **不是家目录**：`config.get_home_dir()` 先看环境变量 `XUN_HOME`，没有就用
-**启动 xun 时所在目录**下的 `.xun`（`Path.cwd() / ".xun"`）。扩展装在 `$XUN_HOME/extensions/` 里，
+xun 的 home：`config.get_home_dir()` 先看环境变量 `XUN_HOME`，没设就是**家目录**下的 `.xun`
+（`Path.home() / ".xun"`，1.5.0 起如此 —— 更早的版本才是启动目录下的 `./.xun`，别照旧帖抄）。
+扩展装在 `$XUN_HOME/extensions/` 里，
 package 形态的文件名固定是 `extensions/<名字>/setup_extension.py`，**目录名就是 extension 的名字**。
 
 ```bash
-XUN_HOME_DIR="${XUN_HOME:-$PWD/.xun}"                 # 在你打算启动 xun 的那个目录里执行
+XUN_HOME_DIR="${XUN_HOME:-$HOME/.xun}"               # 与 xun 自己算 home 的规矩一致
 mkdir -p "$XUN_HOME_DIR/extensions"
 ln -s "$(pwd)/werewolf" "$XUN_HOME_DIR/extensions/werewolf"   # 仓库里的 werewolf/ 就是 extension 目录本身；改完代码重启 xun 生效
 ```
